@@ -495,7 +495,7 @@ export class Bullets {
         if (ex * ex + ey * ey + ez * ez > (Math.sqrt(sl2) + R) ** 2) continue;
         let t = (ex * sx + ey * sy + ez * sz) / sl2; t = t < 0 ? 0 : t > 1 ? 1 : t;
         _v.set(x0 + sx * t, y0 + sy * t, z0 + sz * t);
-        if (e.hitDistance(_v) < 0.6) { e.damage(this.dmg[i], this.owner[i], _v); g.fx.bulletHit(_v, e.kind === 'ship' ? 'metal' : 'metal'); hit = true; }
+        if (e.hitDistance(_v) < 0.6) { e.damage(this.dmg[i], this.owner[i], _v); g.fx.bulletHit(_v, e.kind === 'ship' ? 'metal' : 'metal'); hit = true; if (this.owner[i] === g.player) g.audio.hitTick(); }
       }
       if (!hit && this.antiMissile[i]) {
         for (const m of mis) {

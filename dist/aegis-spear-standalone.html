@@ -75,6 +75,9 @@ input[type=range] { padding: 0; accent-color: var(--amber); height: 28px; backgr
 .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
 .check input { accent-color: var(--amber); width: 16px; height: 16px; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+/* PLAY stays on screen in short windows: the bar sticks to the bottom edge while the options above scroll */
+#menu .actions { position: sticky; bottom: calc(-1 * max(16px, env(safe-area-inset-bottom, 0px))); z-index: 1; padding: 12px 0 16px; margin-block: -12px -16px; background: linear-gradient(to top, rgba(7, 11, 16, 0.97) calc(100% - 12px), rgba(7, 11, 16, 0)); }
+@media (max-height: 820px) { #menu .brand { font-size: clamp(48px, 10.5vh, 112px); } #menu .panel { gap: 14px; } }
 button { font-family: var(--f-display); font-weight: 900; letter-spacing: 0.08em; font-size: 22px; padding: 10px 22px; border: 1px solid var(--rule); background: var(--deck); color: var(--text); cursor: pointer; border-radius: 0; }
 button:hover { border-color: #5b6c7c; }
 button.primary { background: var(--amber); border-color: var(--amber); color: #1a1206; }
@@ -115,7 +118,7 @@ summary { cursor: pointer; padding: 10px 12px; font-family: var(--f-data); font-
 @media (max-width: 520px) { .db-list { grid-template-columns: 1fr; } }
 
 /* in-game coach ("what to press now") + controls card */
-#coach, #keys-card { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); width: min(360px, calc(100vw - 32px)); background: rgba(7, 11, 16, 0.8); border: 1px solid var(--rule); color: var(--text); pointer-events: none; font-family: var(--f-body); }
+#coach, #keys-card { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); box-sizing: border-box; width: var(--card-w, min(388px, calc(100vw - 32px))); background: rgba(7, 11, 16, 0.8); border: 1px solid var(--rule); color: var(--text); pointer-events: none; font-family: var(--f-body); }
 #coach { top: calc(6.4vh + 12px + env(safe-area-inset-top, 0px)); border-left: 3px solid var(--amber); padding: 10px 12px 12px; display: grid; gap: 8px; }
 .c-title { font-family: var(--f-display); font-weight: 700; font-size: 22px; letter-spacing: 0.04em; line-height: 1; color: var(--amber); }
 .c-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
@@ -149,10 +152,11 @@ details.settings { background: transparent; }
 .pad { padding: 4px 12px 14px; }
 @media (max-height: 700px) { .c-tip { display: none; } .c-steps li { font-size: 12px; } }
 
-/* radio subtitles: sender, the radio call itself, and what it means */
-#radio { position: fixed; z-index: 2; left: calc(max(16px, env(safe-area-inset-left, 0px)) + min(360px, calc(100vw - 32px)) + 16px); right: 250px;
-  bottom: calc(7.3vh + 10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 6px; pointer-events: none; }
-.rc { width: min(640px, 100%); background: rgba(7, 11, 16, 0.82); border: 1px solid var(--rule); border-left: 3px solid var(--rc, var(--datum)); padding: 7px 12px 8px 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; row-gap: 3px; transition: opacity 0.2s linear; }
+/* radio subtitles: sender, the radio call itself, and what it means. A column on the right, newest on top, kept
+   below the weapon list and beside the HUD (the radio view sets top and width from the HUD layout). */
+#radio { position: fixed; z-index: 2; right: max(16px, env(safe-area-inset-right, 0px)); top: calc(6.4vh + 12px + env(safe-area-inset-top, 0px));
+  width: min(460px, calc(100vw - 32px)); display: flex; flex-direction: column-reverse; justify-content: flex-end; gap: 6px; pointer-events: none; }
+.rc { width: 100%; box-sizing: border-box; background: rgba(7, 11, 16, 0.82); border: 1px solid var(--rule); border-left: 3px solid var(--rc, var(--datum)); padding: 7px 12px 8px 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; row-gap: 3px; transition: opacity 0.2s linear; }
 .rc p { margin: 0; min-width: 0; }
 .rc-from { grid-row: span 2; font-family: var(--f-data); font-size: 11px; line-height: 1.75; letter-spacing: 0.12em; color: var(--rc, var(--datum)); white-space: nowrap; }
 .rc.live .rc-from::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; vertical-align: 1px; }
@@ -163,7 +167,6 @@ details.settings { background: transparent; }
 .rc-pilot { --rc: #9fd3ff; }
 .rc-wing { --rc: #9fffc8; }
 .rc-enemy { --rc: var(--alarm); }
-@media (max-width: 1100px) { #radio { left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); bottom: auto; top: calc(6.4vh + 12px + env(safe-area-inset-top, 0px)); align-items: flex-end; } .rc { width: min(460px, 100%); } }
 
 /* mission briefing: kneeboard card with the tactical map */
 #briefing { align-items: flex-start; justify-content: center; background: rgba(5, 8, 12, 0.86); }
@@ -195,12 +198,14 @@ details.settings { background: transparent; }
 .bf-threats td.r { font-family: var(--f-data); color: #ff8576; white-space: nowrap; }
 .bf-tips { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 12px; line-height: 1.5; }
 .bf-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; border-top: 1px solid var(--rule); padding-top: 12px; }
+/* START MISSION stays on screen in short windows: the footer sticks to the bottom edge while the briefing scrolls */
+.bf-foot { position: sticky; bottom: calc(-1 * max(16px, env(safe-area-inset-bottom, 0px))); z-index: 1; background: var(--deck); margin: 0 -20px -16px; padding: 12px 20px 16px; box-shadow: 0 -14px 16px -12px rgba(0, 0, 0, 0.6); }
 .bf-facts { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; min-width: 0; flex: 1 1 520px; }
 .bf-facts div { display: grid; gap: 2px; min-width: 0; }
 .bf-facts dt { font-family: var(--f-data); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
 .bf-facts dd { margin: 0; font-family: var(--f-data); font-size: 12px; color: var(--text); }
 .bf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-@media (max-width: 860px) { .bf-body { grid-template-columns: minmax(0, 1fr); } .bf-card { padding: 14px; } }
+@media (max-width: 860px) { .bf-body { grid-template-columns: minmax(0, 1fr); } .bf-card { padding: 14px; } .bf-foot { margin: 0 -14px -14px; padding: 12px 14px 14px; } }
 
 @media (max-width: 640px) {
   #menu { background: rgba(7, 11, 16, 0.86); }
@@ -2583,11 +2588,13 @@ var Ocean = class {
           for (int i = 0; i < ${MAX_SPLASH}; i++) {
             vec4 s = uSplash[i];
             float age = uTime - s.z; if (age < 0.0 || age > 30.0) continue;
-            float d = length(vWP.xz - s.xy);
-            float rr = s.w * (1.0 + age * 0.6) + age * 4.0;
+            float rr = s.w * (1.0 + age * 0.35) + age * 2.5;
+            // ragged churned patch, not a flat white plate: noise eats into the edge and the inside
+            float fs = texture(uNoiseTex, (vWP.xz - s.xy) / (6.0 + s.w * 0.4) + s.xy * 0.013).g;
+            float d = length(vWP.xz - s.xy) + (fnz - 0.5) * rr * 0.35 + (fs - 0.5) * rr * 0.3;
             float ring = exp(-pow((d - rr) / (2.0 + rr * 0.15), 2.0)) * exp(-age * 0.15);
-            float disk = smoothstep(rr, rr * 0.6, d) * exp(-age * 0.12) * 0.8;
-            foam += (ring + disk) * smoothstep(0.2, 0.6, fnz + 0.3);
+            float disk = smoothstep(rr, rr * 0.45, d) * exp(-age * 0.12) * 0.45 * smoothstep(0.2, 0.6, fs + 0.15);
+            foam += (ring * 0.6 + disk) * smoothstep(0.2, 0.6, fnz + 0.3);
           }
           float foamAmt = clamp(crestFoam * 0.6 + foam + shore, 0.0, 1.0) * (1.0 - smoothstep(4000.0, 15000.0, dist));
           vec3 foamCol = vec3(0.85) * (uSunColor * max(dot(N, uSunDir), 0.2) * csh / PI + uSkyAmb);
@@ -5230,19 +5237,21 @@ var smooth2 = (e0, e1, x) => {
   return t * t * (3 - 2 * t);
 };
 var clamp = (x, a, b) => x < a ? a : x > b ? b : x;
+var FCS = { kn: 4.5, cap: 1, kq: 8, kg: 12, lg: 0.08 };
+var AERO = { k: 0.1, a0: 18, a1: 36 };
 function clBasic(a) {
   const ad = Math.abs(a) / D2R2, s = a < 0 ? -1 : 1;
   let attached;
   if (ad <= 16) attached = 0.08 * (a / D2R2);
-  else if (ad <= 22) {
-    const t = (ad - 16) / 6;
-    attached = s * (1.28 + 0.3 * Math.sin(t * Math.PI / 2));
-  } else if (ad <= 30) {
-    const t = (ad - 22) / 8;
-    attached = s * (1.58 - 0.5 * t * t * (3 - 2 * t));
-  } else attached = s * 1.08;
+  else if (ad <= 32) {
+    const t = (ad - 16) / 16;
+    attached = s * (1.28 + 0.67 * Math.sin(t * Math.PI / 2));
+  } else if (ad <= 44) {
+    const t = (ad - 32) / 12;
+    attached = s * (1.95 - 0.5 * t * t * (3 - 2 * t));
+  } else attached = s * 1.45;
   const fp = 1.15 * Math.sin(2 * a);
-  const w = smooth2(30, 42, ad);
+  const w = smooth2(44, 58, ad);
   return attached * (1 - w) + fp * w;
 }
 function cd0(M2) {
@@ -5256,12 +5265,12 @@ function cd0(M2) {
   return 0.0195 + w;
 }
 function kInd(M2) {
-  return M2 < 0.85 ? 0.118 : 0.118 + 0.14 * Math.min(1, (M2 - 0.85) / 0.65);
+  return M2 < 0.85 ? AERO.k : AERO.k + 0.14 * Math.min(1, (M2 - 0.85) / 0.65);
 }
 function cmStatic(a) {
   const ad = Math.abs(a), s = a < 0 ? -1 : 1;
   let cm = -0.22 * a;
-  if (ad > 0.42) cm += s * 0.22 * Math.min(ad - 0.42, 0.35);
+  if (ad > 0.55) cm += s * 0.22 * Math.min(ad - 0.55, 0.35);
   if (ad > 0.95) cm -= s * 0.9 * Math.sin(Math.min(ad - 0.95, 1.2));
   return cm;
 }
@@ -5405,17 +5414,17 @@ var Aircraft = class {
     const ad = Math.abs(alpha);
     const hat = V > 1 ? 1 / (2 * V) : 0;
     const qc = q * JET.c * hat, pb = p * JET.b * hat, rb = r * JET.b * hat;
-    const stall = smooth2(18 * D2R2, 28 * D2R2, ad);
+    const stall = smooth2(26 * D2R2, 38 * D2R2, ad);
     let CL = clBasic(alpha) + 0.32 * this.flap * (1 - stall) + 3.2 * qc + 0.42 * this.de * (1 - 0.5 * stall);
     const K = kInd(M2);
     const clA = Math.min(Math.abs(CL), 1.7);
     const sinA = Math.sin(alpha);
-    let CD = cd0(M2) + this.storesDrag + K * clA * clA * (1 - stall) + 1.35 * sinA * sinA * smooth2(14 * D2R2, 32 * D2R2, ad) + 0.024 * this.gear + 0.06 * this.airbrakePos + 0.05 * this.flap + 0.45 * Math.sin(beta) ** 2 + 0.02 * this.hook;
+    let CD = cd0(M2) + this.storesDrag + K * clA * clA * (1 - stall) + 1.35 * sinA * sinA * smooth2(AERO.a0 * D2R2, AERO.a1 * D2R2, ad) + 0.024 * this.gear + 0.06 * this.airbrakePos + 0.05 * this.flap + 0.45 * Math.sin(beta) ** 2 + 0.02 * this.hook;
     const CY = -0.85 * beta + 0.16 * this.dr;
-    let Clp = -0.42 * (1 - 1.25 * smooth2(20 * D2R2, 34 * D2R2, ad));
-    const Cl = -0.075 * beta + 0.16 * this.da + Clp * pb + 0.06 * rb + 0.012 * this.dr + this.dropRandom * smooth2(18 * D2R2, 27 * D2R2, ad);
+    let Clp = -0.42 * (1 - 1.25 * smooth2(28 * D2R2, 42 * D2R2, ad));
+    const Cl = -0.075 * beta + 0.16 * this.da + Clp * pb + 0.06 * rb + 0.012 * this.dr + this.dropRandom * smooth2(28 * D2R2, 36 * D2R2, ad);
     const Cm = cmStatic(alpha) - 1.1 * this.de - 5.5 * qc + 0.03 * this.airbrakePos - 0.025 * this.flap + 6e-3 * this.gear;
-    const Cnb = 0.11 * (1 - 0.85 * smooth2(18 * D2R2, 42 * D2R2, ad));
+    const Cnb = 0.11 * (1 - 0.85 * smooth2(26 * D2R2, 46 * D2R2, ad));
     const Cn = Cnb * beta + 0.075 * this.dr - 0.28 * rb - 6e-3 * this.da - 0.03 * pb;
     out.CL = CL;
     out.CD = CD;
@@ -5591,23 +5600,26 @@ var Aircraft = class {
     const sp = c.pitch;
     let nCmd = sp >= 0 ? nNeutral + sp * (nMax - nNeutral) : nNeutral + sp * (nNeutral - nMin);
     if (gearDown && lim) nCmd = nNeutral + sp * 1.2;
-    const nMeas = this.nz;
-    const qSS = G0 * (nCmd - Math.cos(theta) * Math.cos(phi)) / V;
-    let qDes = qSS + 2.2 * (nCmd - nMeas) * G0 / V;
+    const nMeas = this.nz, ctc = Math.cos(theta) * Math.cos(phi);
+    const qSS = G0 * (nCmd - ctc) / V;
+    let qDes = qSS + (gearDown ? 2.2 * (nCmd - nMeas) * G0 / V : clamp(FCS.kn * (nCmd - nMeas) * G0 / V, -FCS.cap, FCS.cap));
     if (this.handsOff > 0) {
       this.handsOff -= dt;
       if (Math.abs(sp) < 0.2) qDes = 1.2 * (12 * D2R2 - theta);
     }
     if (lim) {
-      const aMax = (gearDown ? 15 : 24.5) * D2R2, aMin = -9 * D2R2;
-      if (this.alpha > aMax - 4 * D2R2) qDes = Math.min(qDes, 3 * (aMax - this.alpha));
-      if (this.alpha < aMin + 3 * D2R2) qDes = Math.max(qDes, 3 * (aMin - this.alpha));
+      const qHold = G0 * (nMeas - ctc) / V, aDot = q - qHold, aPred = this.alpha + aDot * 0.25;
+      let qHi = qHold + 2.5 * ((gearDown ? 15 : 30) * D2R2 - aPred), qLo = qHold + 2.5 * (-9 * D2R2 - aPred);
+      const zA = Math.max(qbar * S * 4.58 / (this.mass * G0), 2);
+      qHi = Math.min(qHi, qHold + FCS.kg * ((nMax - nMeas) / zA - aDot * FCS.lg));
+      qLo = Math.max(qLo, qHold + FCS.kg * ((nMin - nMeas) / zA - aDot * FCS.lg));
+      qDes = clamp(qDes, qLo, qHi);
     } else {
       const aExcess = Math.abs(this.alpha) - 22 * D2R2;
       if (Math.abs(sp) > 0.05) qDes = sp * 0.9;
       else qDes = aExcess > 0 ? -Math.sign(this.alpha) * Math.min(1.6, 2.2 * aExcess + 0.3) : qDes * 0.5;
     }
-    const qDot = (lim ? 6 : 9) * (qDes - q);
+    const qDot = (lim ? gearDown ? 6 : FCS.kq : 9) * (qDes - q);
     const co = this._co2 || (this._co2 = {});
     const de0 = this.de;
     this.de = 0;
@@ -5664,7 +5676,7 @@ var Aircraft = class {
     }
     this.dropRandom += ((this._dropTarget || 0) - this.dropRandom) * Math.min(1, dt * 2);
     const ad = Math.abs(this.alpha);
-    this.buffet = smooth2(14 * D2R2, 24 * D2R2, ad) * smooth2(1500, 9e3, this.qbar) + (this.mach > 0.92 && this.mach < 1.06 ? 0.25 : 0);
+    this.buffet = smooth2(16 * D2R2, 30 * D2R2, ad) * smooth2(1500, 9e3, this.qbar) + (this.mach > 0.92 && this.mach < 1.06 ? 0.25 : 0);
     this._bufN = this._bufN || [0, 0, 0];
     this._bufN[0] = (Math.random() - 0.5) * 2;
     this._bufN[1] = (Math.random() - 0.5) * 2;
@@ -6815,6 +6827,7 @@ var Bullets = class {
           e.damage(this.dmg[i], this.owner[i], _v11);
           g.fx.bulletHit(_v11, e.kind === "ship" ? "metal" : "metal");
           hit = true;
+          if (this.owner[i] === g.player) g.audio.hitTick();
         }
       }
       if (!hit && this.antiMissile[i]) {
@@ -6898,7 +6911,9 @@ import * as THREE17 from "three";
 var _v12 = new THREE17.Vector3();
 var _v26 = new THREE17.Vector3();
 var _v34 = new THREE17.Vector3();
-var PT = { SMOKE: 0, FIRE: 1, FLASH: 2, SPARK: 3, DUST: 4, SPRAY: 5, STEAM: 6, FLARE: 7, MUZZLE: 8, EMBER: 9 };
+var BLAST = { ballN: 3, ballHeat: 2.6, ballCool: 1.6, fireN: 2, fireCol: [0.25, 0.13, 0.06] };
+var VORTEX_MAX_ANGLE = 0.035;
+var PT = { SMOKE: 0, FIRE: 1, FLASH: 2, SPARK: 3, DUST: 4, SPRAY: 5, STEAM: 6, FLARE: 7, MUZZLE: 8, EMBER: 9, BALL: 10 };
 var PARTICLE_VS = (
   /* glsl */
   `
@@ -6964,8 +6979,11 @@ void main() {
   else {
     vec3 alb = vColor.rgb;
     col = alb * (uSunColor * ndl * ndl * 0.3 + uSkyAmb * 0.9 + uGroundAmb * 0.4);
-    // self-glow at the base of fresh fire smoke
-    col += vec3(1.0, 0.45, 0.15) * max(vColor.a - 0.6, 0.0) * 6.0 * (1.0 - r);
+    // self-glow of fresh fire smoke; heat above 1 is a fireball's body, brighter but kept orange (the tone curve
+    // turns anything much brighter white)
+    float h = vColor.a;
+    float gI = max(min(h, 1.0) - 0.6, 0.0) * 6.0 + max(h - 1.0, 0.0) * 2.2;
+    col += mix(vec3(1.0, 0.45, 0.15), vec3(1.0, 0.52, 0.2), smoothstep(1.3, 2.6, h)) * gI * (1.0 - r);
     col = col * vFogT + vHaze * (1.0 - vFogT);
   }
   gl_FragColor = vec4(col * a, a);
@@ -7013,6 +7031,7 @@ var ParticleSystem = class {
     this.drag = new Float32Array(max);
     this.buoy = new Float32Array(max);
     this.seed = new Float32Array(max);
+    this.cool = new Float32Array(max);
     this.order = new Uint32Array(max);
     this.keys = new Float32Array(max);
     const g = new THREE17.InstancedBufferGeometry();
@@ -7097,6 +7116,7 @@ var ParticleSystem = class {
     this.drag[i] = o.drag != null ? o.drag : 0.5;
     this.buoy[i] = o.buoy || 0;
     this.seed[i] = Math.random();
+    this.cool[i] = o.cool || 0;
     return i;
   }
   kill(i) {
@@ -7119,6 +7139,7 @@ var ParticleSystem = class {
     this.drag[i] = this.drag[j];
     this.buoy[i] = this.buoy[j];
     this.seed[i] = this.seed[j];
+    this.cool[i] = this.cool[j];
   }
   update(dt, camera, wind) {
     const P = this.pos, V = this.vel;
@@ -7172,7 +7193,11 @@ var ParticleSystem = class {
       switch (t) {
         case PT.SMOKE:
           a *= Math.min(1, f * 8) * (1 - f) ** 1.3;
-          heat *= 1 - f;
+          heat *= (1 - f) * (this.cool[i] ? Math.exp(-this.age[i] * this.cool[i]) : 1);
+          break;
+        case PT.BALL:
+          a *= Math.min(1, f * 40) * (1 - f) ** 1.3;
+          heat *= (1 - f) * Math.exp(-this.age[i] * this.cool[i]);
           break;
         case PT.DUST:
         case PT.SPRAY:
@@ -7250,9 +7275,9 @@ var Trail = class {
       this.emitting = true;
       this.pts.push(null);
     }
-    const last = this.pts.length ? this.pts[this.pts.length - 1] : null;
+    const n = this.pts.length, last = n ? this.pts[n - 1] : null, prev = n > 1 ? this.pts[n - 2] : null;
     const t = this.sys.time;
-    if (last && last.p.distanceToSquared(p) < this.minStep * this.minStep) {
+    if (last && prev && prev.p.distanceToSquared(p) < this.minStep * this.minStep) {
       last.p.copy(p);
       last.t = t;
       return;
@@ -7296,6 +7321,8 @@ void main() {
   float sceneW = d < 0.999999 ? exp2(d * uLogFar) - 1.0 : 1e9;
   float vz = -(viewMatrix * vec4(vWP, 1.0)).z;
   a *= clamp((sceneW - vz) / 3.0, 0.0, 1.0);
+  // thin out where the ribbon passes right by the camera instead of smearing a wide band across the screen
+  a *= smoothstep(2.0, 16.0, vz);
   if (a < 0.003) discard;
   vec3 col = uThermal > 0.5 ? vec3(0.15 + 0.3 * (1.0 - vData.x)) : vCol * (uSunColor * 0.12 + uSkyAmb * 1.0);
   if (uThermal < 0.5) col = col * vFogT + vHaze * (1.0 - vFogT);
@@ -7380,7 +7407,8 @@ var TrailSystem = class {
         _v26.copy(p.p).sub(cam);
         _v34.copy(_v12).cross(_v26).normalize();
         const age = (this.time - p.t) / tr.maxAge;
-        const w = (tr.w0 + tr.grow * (this.time - p.t) * 2) * p.w * 0.5;
+        let w = (tr.w0 + tr.grow * (this.time - p.t) * 2) * p.w * 0.5;
+        if (tr.kind === "vortex") w = Math.min(w, _v26.length() * VORTEX_MAX_ANGLE);
         if (pv) along += p.p.distanceTo(pv.p);
         for (let s = -1; s <= 1; s += 2) {
           P[nv * 3] = p.p.x + _v34.x * w * s;
@@ -7688,7 +7716,7 @@ var FX = class {
       vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP; void main(){ vP = position; vN = normalize(normalMatrix*normal); vec4 mv = modelViewMatrix*vec4(position,1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
       fragmentShader: `uniform float uA; uniform sampler2D uNoiseTex; uniform vec3 uSkyAmb; uniform vec3 uSunColor; uniform float uThermal; varying vec3 vN; varying vec3 vV; varying vec3 vP;
         void main(){ float rim = 1.0 - abs(dot(vN, vV)); float n = texture(uNoiseTex, vP.xz * 0.6 + vP.y * 0.3).r;
-          float a = uA * (0.25 + 0.75 * pow(rim, 1.5)) * smoothstep(0.25, 0.7, n + 0.2) * smoothstep(-0.05, 0.25, vP.y);
+          float a = uA * (0.25 + 0.75 * pow(rim, 1.5)) * (1.0 - smoothstep(0.6, 0.98, rim)) * smoothstep(0.25, 0.7, n + 0.2) * smoothstep(-0.05, 0.25, vP.y);
           vec3 c = uThermal > 0.5 ? vec3(0.1) : vec3(0.9) * (uSkyAmb * 1.2 + uSunColor * 0.08);
           gl_FragColor = vec4(c * a, a); }`,
       transparent: true,
@@ -7701,6 +7729,7 @@ var FX = class {
     });
     this.wilsonGeo = new THREE17.SphereGeometry(1, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
     this.shake = 0;
+    this.blast = BLAST;
   }
   setDepth(depthTex, w, h) {
     this.depthU.uDepth.value = depthTex;
@@ -7756,26 +7785,47 @@ var FX = class {
     const A = this.ps.add, S = this.ps.alpha;
     const water = !!o.water;
     const surface = o.surface || "air";
+    const fuel = !!o.fuel;
     this.lights.add(p, [1, 0.85, 0.65], 5e3 * size * size, 0.2 + size * 0.03, { decay: 3 });
     this.lights.add(p, [1, 0.45, 0.15], 1500 * size * size, 1.2 + size * 0.25, { decay: 1.5 });
-    A.spawn(PT.FLASH, p.x, p.y, p.z, 0, 0, 0, 4 + size * 5, 0.12 + size * 0.015, { color: [60, 52, 45], must: true });
-    A.spawn(PT.FLASH, p.x, p.y, p.z, 0, 0, 0, 2 + size * 2.5, 0.25 + size * 0.02, { color: [30, 18, 8] });
-    const shockR = 25 + size * 22;
+    A.spawn(PT.FLASH, p.x, p.y, p.z, 0, 0, 0, 3 + size * 3.5, 0.08 + size * 0.01, { color: [60, 52, 45], must: true });
+    A.spawn(PT.FLASH, p.x, p.y, p.z, 0, 0, 0, 2 + size * 2.5, 0.25 + size * 0.02, { color: [16, 8, 2.5] });
+    const shockR = 15 + size * 14;
     const sm = new THREE17.Mesh(this.shockGeo, this.shockMat.clone());
     sm.position.copy(p);
     sm.scale.setScalar(1);
     sm.frustumCulled = false;
     this.pipe.distScene.add(sm);
     this.shocks.push({ mesh: sm, age: 0, life: 0.45 + size * 0.06, R: shockR, kind: "shock" });
-    if (size >= 6 && (water || p.y < 120)) {
+    if (size >= 7 && (water || p.y < 120)) {
       const wm = new THREE17.Mesh(this.wilsonGeo, this.wilsonMat.clone());
       wm.position.copy(p);
       wm.position.y = Math.max(p.y - 4, water ? 0 : p.y - 4);
       wm.frustumCulled = false;
       this.scene.add(wm);
-      this.shocks.push({ mesh: wm, age: 0, life: 1.1, R: shockR * 1.3, kind: "wilson" });
+      this.shocks.push({ mesh: wm, age: 0, life: 0.8, R: 14 + size * 4, kind: "wilson" });
     }
-    const nf = Math.floor(8 + size * 7);
+    const B = BLAST, up = surface === "air" ? 0 : 1, more = (fuel ? 1.3 : 1) * (water ? 0.6 : 1);
+    const nb = Math.floor((5 + size * B.ballN) * more);
+    for (let i = 0; i < nb; i++) {
+      const dir = _v12.set(Math.random() - 0.5, Math.random() * (0.8 + up * 0.2) - 0.5 + up * 0.4, Math.random() - 0.5).normalize();
+      const sp = (1.5 + Math.random() * 5) * Math.sqrt(size) * 2;
+      const dk = water ? 0.3 : fuel ? 0.05 : surface === "air" ? 0.13 : 0.07;
+      S.spawn(
+        PT.BALL,
+        p.x + dir.x * size * 0.4,
+        p.y + dir.y * size * 0.4,
+        p.z + dir.z * size * 0.4,
+        dir.x * sp,
+        dir.y * sp + size * 0.6,
+        dir.z * sp,
+        (1.4 + Math.random() * 1.8) * Math.pow(size, 0.8),
+        2.5 + Math.random() * 2 + size * 0.3,
+        { grow: size * 1.5, drag: 2, buoy: 4 + size * 0.8, color: [dk, dk * 0.93, dk * 0.88], alpha: 0.95, heat: B.ballHeat + Math.random() * 0.5, cool: B.ballCool * (0.8 + Math.random() * 0.5), must: i < 4 }
+      );
+    }
+    const nf = Math.floor((4 + size * B.fireN) * more);
+    const fc = B.fireCol;
     for (let i = 0; i < nf; i++) {
       const dir = _v12.set(Math.random() - 0.5, Math.random() * (surface === "air" ? 1 : 0.8) - (surface === "air" ? 0.5 : -0.1), Math.random() - 0.5).normalize();
       const sp = (2 + Math.random() * 6) * Math.sqrt(size) * 2.2;
@@ -7787,16 +7837,16 @@ var FX = class {
         dir.x * sp,
         dir.y * sp + size * 0.8,
         dir.z * sp,
-        (1.5 + Math.random() * 2.5) * Math.pow(size, 0.8),
-        0.5 + Math.random() * 0.6 + size * 0.06,
-        { grow: size * 2.2, drag: 2, buoy: 6 + size, color: [1, 1, 1], must: i < 6 }
+        (1.2 + Math.random() * 2) * Math.pow(size, 0.8),
+        0.45 + Math.random() * 0.5 + size * 0.05,
+        { grow: size * 1.8, drag: 2, buoy: 6 + size, color: fc, must: i < 6 }
       );
     }
-    const ns = Math.floor(6 + size * 5);
+    const ns = Math.floor((6 + size * 5) * (fuel ? 1.3 : 1));
     for (let i = 0; i < ns; i++) {
       const dir = _v12.set(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).normalize();
       const sp = (1 + Math.random() * 4) * Math.sqrt(size) * 1.6;
-      const dark = surface === "air" ? 0.16 + Math.random() * 0.1 : 0.05 + Math.random() * 0.06;
+      const dark = water ? 0.32 + Math.random() * 0.15 : fuel ? 0.045 + Math.random() * 0.045 : surface === "air" ? 0.16 + Math.random() * 0.1 : 0.05 + Math.random() * 0.06;
       S.spawn(
         PT.SMOKE,
         p.x + dir.x * size,
@@ -7807,7 +7857,7 @@ var FX = class {
         dir.z * sp,
         (2 + Math.random() * 3) * Math.pow(size, 0.85),
         6 + Math.random() * 6 + size * 2,
-        { grow: 1.2 + size * 0.9, drag: 0.7, buoy: 2 + size * 0.6, color: [dark, dark * 0.95, dark * 0.9], alpha: 0.9, heat: 0.9 }
+        { grow: 1.2 + size * 0.9, drag: 0.7, buoy: 2 + size * 0.6, color: [dark, dark * 0.95, dark * 0.9], alpha: 0.9, heat: 0.9, cool: 1.1 }
       );
     }
     if (surface !== "water") {
@@ -7869,10 +7919,10 @@ var FX = class {
       }
       if (s.kind === "shock") {
         s.mesh.scale.setScalar(Math.max(1, s.R * Math.sqrt(f)));
-        s.mesh.material.uniforms.uStr.value = 0.035 * (1 - f);
+        s.mesh.material.uniforms.uStr.value = 0.025 * (1 - f);
       } else {
         s.mesh.scale.set(s.R * (0.4 + 0.6 * Math.sqrt(f)), s.R * (0.25 + 0.4 * f), s.R * (0.4 + 0.6 * Math.sqrt(f)));
-        s.mesh.material.uniforms.uA.value = 0.7 * Math.sin(Math.PI * Math.min(1, f * 1.3)) * (1 - f);
+        s.mesh.material.uniforms.uA.value = 0.45 * Math.sin(Math.PI * Math.min(1, f * 1.3)) * (1 - f);
       }
     }
     for (let i = this.emitters.length - 1; i >= 0; i--) {
@@ -7890,9 +7940,48 @@ var FX = class {
         this.ps.add.spawn(PT.EMBER, e.pos.x, e.pos.y, e.pos.z, 0, 0, 0, 0.5, 0.15, { color: [15, 14, 12] });
         continue;
       }
-      if (e.follow) e.pos.copy(e.follow());
+      if (e.follow) {
+        const np = e.follow();
+        if (e.age > dt * 1.5) (e.vel || (e.vel = new THREE17.Vector3())).copy(np).sub(e.pos).multiplyScalar(1 / Math.max(dt, 1e-3));
+        e.pos.copy(np);
+      }
       e.acc += dt;
       const k = Math.max(0.15, 1 - e.age / e.life);
+      const spd = e.vel ? e.vel.length() : 0;
+      if (spd > 30 && spd < 1500) {
+        const step = Math.min(0.05, 3.5 / spd), V = e.vel;
+        while (e.acc > step) {
+          e.acc -= step;
+          const back = e.acc;
+          e.n = (e.n || 0) + 1;
+          const x = e.pos.x - V.x * back, y = e.pos.y - V.y * back, z = e.pos.z - V.z * back, j = 0.8 * e.I;
+          if (!e.smokeOnly) this.ps.add.spawn(
+            PT.FIRE,
+            x + (Math.random() - 0.5) * j,
+            y + (Math.random() - 0.5) * j,
+            z + (Math.random() - 0.5) * j,
+            V.x * 0.3,
+            V.y * 0.3,
+            V.z * 0.3,
+            (1.2 + Math.random() * 1.4) * e.I,
+            0.22 + Math.random() * 0.2,
+            { grow: 3 * e.I, drag: 2.5, color: [0.55, 0.5, 0.45] }
+          );
+          if (e.n % 3 === 0) this.ps.alpha.spawn(
+            PT.SMOKE,
+            x,
+            y,
+            z,
+            V.x * 0.1,
+            0,
+            V.z * 0.1,
+            (1.5 + Math.random() * 1.5) * e.I,
+            5 + Math.random() * 4,
+            { grow: 2.5 * e.I, drag: 0.6, buoy: 1.5, color: [0.06, 0.058, 0.055], alpha: 0.55 * k, heat: 0.75, cool: 2 }
+          );
+        }
+        continue;
+      }
       const rate = 0.08 / Math.max(e.I, 0.3);
       while (e.acc > rate) {
         e.acc -= rate;
@@ -8229,11 +8318,13 @@ var Player = class extends Entity {
     if (this.game.opts.invulnerable) {
       if (amount > 5) {
         this.game.rig.shake = Math.min(2, this.game.rig.shake + 0.6);
+        this.game.audio.hullHit(0.6);
         this.game.msg("HIT! (PRACTICE: NO DAMAGE)", 1, "#ffb080");
       }
       return;
     }
     super.damage(amount, src, point);
+    if (this.alive && amount > 2) this.game.audio.hullHit(amount / 30);
     if (this.alive && amount > 5) {
       this.game.rig.shake = Math.min(2, this.game.rig.shake + amount / 40);
       if (this.hp < 70) this.ac.engineHealth = Math.max(0.25, this.hp / 100);
@@ -8339,8 +8430,8 @@ var Player = class extends Entity {
       if (!this.trails.vl) {
         this.trails.vl = g.fx.trails.create({ kind: "vortex", width: 0.3, opacity: 0.55 });
         this.trails.vr = g.fx.trails.create({ kind: "vortex", width: 0.3, opacity: 0.55 });
-        this.trails.ll = g.fx.trails.create({ kind: "vortex", width: 1.6, opacity: 0.32, maxAge: 0.7, grow: 2.5 });
-        this.trails.lr = g.fx.trails.create({ kind: "vortex", width: 1.6, opacity: 0.32, maxAge: 0.7, grow: 2.5 });
+        this.trails.ll = g.fx.trails.create({ kind: "vortex", width: 1, opacity: 0.32, maxAge: 0.12, grow: 3 });
+        this.trails.lr = g.fx.trails.create({ kind: "vortex", width: 1, opacity: 0.32, maxAge: 0.12, grow: 3 });
       }
       this.trails.vl.add(wt(JET_GEOM.wingtipL));
       this.trails.vr.add(wt(JET_GEOM.wingtipR));
@@ -8359,8 +8450,8 @@ var Player = class extends Entity {
         this.trails.c1 = g.fx.trails.create({ kind: "contrail", width: 1.4, opacity: 0.5 });
         this.trails.c2 = g.fx.trails.create({ kind: "contrail", width: 1.4, opacity: 0.5 });
       }
-      this.trails.c1.add(wt(JET_GEOM.nozzleL).addScaledVector(s.v, -0.4));
-      this.trails.c2.add(wt(JET_GEOM.nozzleR).addScaledVector(s.v, -0.4));
+      this.trails.c1.add(wt(JET_GEOM.nozzleL).addScaledVector(s.v, -0.2));
+      this.trails.c2.add(wt(JET_GEOM.nozzleR).addScaledVector(s.v, -0.2));
     } else if (this.trails.c1) {
       this.trails.c1.stop();
       this.trails.c2.stop();
@@ -8711,11 +8802,19 @@ var Player = class extends Entity {
       const G4 = {};
       const gunDir = _v13.set(0, 0.0262, -1).normalize().applyQuaternion(s.q).clone();
       if (this.radar.stt && this.radar.stt.pos.distanceTo(s.p) < 3e3) {
-        const T = this.radar.stt;
-        T._acc = T._acc || new THREE19.Vector3();
-        T._pv = T._pv || T.vel.clone();
-        T._acc.lerp(_v27.copy(T.vel).sub(T._pv).multiplyScalar(60), 0.1);
-        T._pv.copy(T.vel);
+        const T = this.radar.stt, now = g.time;
+        const age = now - T._pt;
+        if (!T._acc || !(age >= 0 && age <= 0.5)) {
+          T._acc = new THREE19.Vector3();
+          T._pv = T.vel.clone();
+          T._pt = now;
+        }
+        const dtS = now - T._pt;
+        if (dtS > 1e-4) {
+          T._acc.lerp(_v27.copy(T.vel).sub(T._pv).divideScalar(dtS), 1 - Math.exp(-dtS / 0.17));
+          T._pv.copy(T.vel);
+          T._pt = now;
+        }
         G4.lcos = lcosSolution(s.p, s.v, gunDir, T, T._acc);
       }
       const f = [];
@@ -8741,6 +8840,7 @@ var D2R6 = Math.PI / 180;
 var _v14 = new THREE20.Vector3();
 var _v28 = new THREE20.Vector3();
 var _v36 = new THREE20.Vector3();
+var _v44 = new THREE20.Vector3();
 var _m3 = new THREE20.Matrix4();
 var _q5 = new THREE20.Quaternion();
 function rnd(a, b) {
@@ -8761,9 +8861,11 @@ var AIJet = class extends Entity {
     this.up = new THREE20.Vector3(0, 1, 0);
     this.mass = 21e3;
     this.S = 62;
+    this.clMax = 1.5;
     this.throttle = 0.7;
     this.ab = 0;
-    this.maxG = 8.5;
+    this.maxG = 8;
+    this.rollRate = 200 * D2R6;
     this.state = "patrol";
     this.cap = o.cap ? o.cap.clone() : this.pos.clone();
     this.capAlt = o.capAlt || 6e3;
@@ -8828,32 +8930,46 @@ var AIJet = class extends Entity {
     const vhat = _v14.copy(this.vel).multiplyScalar(1 / V);
     const rho = rhoAt(this.pos.y);
     const q = 0.5 * rho * V * V;
-    const gAvail = q * this.S * 1.75 / (this.mass * G0);
+    const gAvail = q * this.S * this.clMax / (this.mass * G0);
     const gLim = Math.min(this.maxG, gAvail);
     const look = _v28.copy(this.pos).addScaledVector(vhat, V * 4);
     const gh = Math.max(g.terrain.heightAt(look.x, look.z), g.terrain.heightAt(this.pos.x, this.pos.z), 0);
     const want = _v36.copy(dir).normalize();
-    if (this.pos.y < gh + 220 || look.y < gh + 150) {
+    const lowAlt = this.pos.y < gh + 220 || look.y < gh + 150;
+    if (lowAlt) {
       want.y = Math.max(want.y, 0.35 + (gh + 220 - this.pos.y) / 400);
       want.normalize();
     }
     const cosA = THREE20.MathUtils.clamp(vhat.dot(want), -1, 1);
     const ang = Math.acos(cosA);
-    let turnRate = 0;
     const axis = new THREE20.Vector3().copy(vhat).cross(want);
     if (axis.lengthSq() < 1e-8) axis.copy(this.up).cross(vhat);
     axis.normalize();
-    if (ang > 1e-4) {
-      const omegaMax = gLim * G0 / V;
-      turnRate = Math.min(omegaMax, ang * 2.5);
-      const newDir = vhat.clone().applyAxisAngle(axis, Math.min(ang, turnRate * dt));
-      this.vel.copy(newDir).multiplyScalar(V);
-    }
-    const aTurn = axis.clone().cross(vhat).multiplyScalar(turnRate * V);
-    const lift = aTurn.add(new THREE20.Vector3(0, G0, 0));
+    const turnRate = ang > 1e-4 ? Math.min(gLim * G0 / V, ang * 2.5) : 0;
+    const lift = axis.clone().cross(vhat).multiplyScalar(turnRate * V).add(_v44.set(0, G0, 0));
     lift.addScaledVector(vhat, -lift.dot(vhat));
-    this.gLoad = lift.length() / G0;
-    if (lift.lengthSq() > 1e-4) this.up.lerp(lift.normalize(), Math.min(1, dt * 4)).normalize();
+    let nWant = lift.length() / G0;
+    if (nWant > gLim) {
+      lift.multiplyScalar(gLim / nWant);
+      nWant = gLim;
+    }
+    const up = this.up.addScaledVector(vhat, -this.up.dot(vhat));
+    if (up.lengthSq() < 1e-6) up.set(0, 1, 0).addScaledVector(vhat, -vhat.y);
+    up.normalize();
+    if (nWant > 1e-3) {
+      const dWant = lift.clone().multiplyScalar(1 / (nWant * G0));
+      const off = Math.acos(THREE20.MathUtils.clamp(up.dot(dWant), -1, 1));
+      if (off > 1e-4) {
+        const rAxis = up.clone().cross(dWant);
+        if (rAxis.lengthSq() < 1e-10) rAxis.copy(vhat);
+        const pMax = this.rollRate * Math.sqrt(THREE20.MathUtils.clamp(q / 14e3, 0.1, 1)) * (lowAlt ? 1.5 : 1);
+        up.applyAxisAngle(rAxis.normalize(), Math.min(off, pMax * dt)).normalize();
+      }
+      nWant *= Math.max(0, up.dot(dWant));
+    }
+    const aPerp = up.clone().multiplyScalar(nWant * G0).add(_v44.set(0, -G0, 0).addScaledVector(vhat, G0 * vhat.y));
+    this.vel.addScaledVector(aPerp, dt).setLength(V);
+    this.gLoad = nWant;
     const CL = this.gLoad * this.mass * G0 / Math.max(q * this.S, 1);
     const M2 = V / soundAt(this.pos.y);
     const cd = 0.022 + (M2 > 0.85 ? Math.min(0.03, (M2 - 0.85) * 0.12) : 0) + 0.12 * CL * CL;
@@ -9113,6 +9229,7 @@ var AIJet = class extends Entity {
     this.fallT = 0;
     this.spin.set(rnd(-1, 1), rnd(-2, 2), rnd(-3, 3));
     this.fire_ = this.game.fx.addFire(this.pos, 0.8, 30, { follow: () => this.pos });
+    if (!this.smokeTrail) this.smokeTrail = this.game.fx.trails.create({ kind: "smoke", width: 2.5, grow: 2, maxAge: 12, opacity: 0.85, color: [0.09, 0.09, 0.09], minStep: 5 });
     this.flames.forEach((f) => f.set(0, 0));
     if (this.audio) this.audio.stop();
     this.radar.on = false;
@@ -9132,7 +9249,7 @@ var AIJet = class extends Entity {
     const th = g.terrain.heightAt(this.pos.x, this.pos.z);
     if (this.pos.y < Math.max(th, 0)) {
       this.falling = false;
-      g.fx.explosion(this.pos.clone(), 6, { surface: th > 0 ? "ground" : "water", water: th <= 0 });
+      g.fx.explosion(this.pos.clone(), 6, { surface: th > 0 ? "ground" : "water", water: th <= 0, fuel: true });
       if (this.fire_) this.fire_.life = 0;
       this.root.visible = false;
       if (this.smokeTrail) this.smokeTrail.stop();
@@ -9613,7 +9730,7 @@ var D2R7 = Math.PI / 180;
 var _v15 = new THREE22.Vector3();
 var _v29 = new THREE22.Vector3();
 var _v37 = new THREE22.Vector3();
-var _v44 = new THREE22.Vector3();
+var _v45 = new THREE22.Vector3();
 var UP = new THREE22.Vector3(0, 1, 0);
 var LOADS = {
   strike: { L1: "aim9x", R1: "aim9x", L2: "agm88", R2: "agm88", L3: "agm84", R3: "agm84", L4: "gbu39x4", R4: "gbu39x4", R6: "aim120" },
@@ -9630,6 +9747,8 @@ var PLAIN2 = { aim120: "a radar missile", aim9x: "a heat-seeker", gbu39: "a smal
 var CALL = { aim120: "Fox three", aim9x: "Fox two", gbu39: "bombs away", agm88: "Magnum", agm84: "Bruiser" };
 var NUMW = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight"];
 var SLOT = new THREE22.Vector3(30, 3, 14);
+var HUNT_FIGHT_MAX = 90;
+var HUNT_IGNORE = 60;
 var CAT = CATS[1];
 var CAT_LEN = CAT.z0 - CAT.z1;
 var CAT_V = 80;
@@ -9648,12 +9767,16 @@ var Wingman = class extends AIJet {
     this.maxG = 9;
     this.bvrScale = 0.6;
     const R = this.radar;
-    R.inCoverage = (tp) => R.forward(_v37).dot(_v44.copy(tp).sub(R.pos).normalize()) > Math.cos(R.azHalf);
+    R.inCoverage = (tp) => R.forward(_v37).dot(_v45.copy(tp).sub(R.pos).normalize()) > Math.cos(R.azHalf);
     this.order = "cover";
     this.orderTgt = null;
     this.strike = null;
     this.kills = 0;
     this.idleT = 0;
+    this.fightFoe = null;
+    this.fightAt = 0;
+    this.fightSeen = 0;
+    this.ignore = null;
     this.mode = "join";
     this.joined = false;
     this.slotErr = Infinity;
@@ -9837,7 +9960,7 @@ var Wingman = class extends AIJet {
     const reach = this.strike || o === "attack" ? 12e3 : o === "hunt" ? M2 && M2.kind === "strike" && this.huntTargets().length ? 15e3 : 9e4 : 0;
     let best = null, bs = Infinity;
     for (const j of g.aiJets) {
-      if (!this.canFight(j)) continue;
+      if (!this.canFight(j) || o === "hunt" && this.ignore && this.ignore.j === j && g.time < this.ignore.until) continue;
       const R = j.pos.distanceTo(this.pos);
       if (reach ? R > reach : R > 15e3 && j.pos.distanceTo(P.pos) > 25e3) continue;
       const s = R * (j === this.foe ? 0.7 : 1);
@@ -9869,9 +9992,24 @@ var Wingman = class extends AIJet {
       this.state = "patrol";
       this.radar.stt = null;
     }
+    if (this.order === "hunt" && this.huntTargets().length) {
+      if (this.foe && (this.foe !== this.fightFoe || g.time - this.fightSeen > 30)) {
+        this.fightFoe = this.foe;
+        this.fightAt = g.time;
+      }
+      if (this.foe) this.fightSeen = g.time;
+      if (this.foe && this.state !== "defend" && g.time - this.fightAt > HUNT_FIGHT_MAX) {
+        this.say("bugging out, pressing to the target.", `Your wingman can't finish ${this.foe.name} quickly, so he breaks off and goes back to his own targets.`, { key: "w-brk", every: 30 });
+        this.ignore = { j: this.foe, until: g.time + HUNT_IGNORE };
+        this.foe = null;
+        this.fightFoe = null;
+        this.state = "patrol";
+        this.radar.stt = null;
+      }
+    } else this.fightFoe = null;
     if (this.foe && this.state === "intercept" && was === "patrol") {
       const G4 = g.comms.geo(this.foe.pos);
-      this.say(`engaged, bandit ${G4.clock} o'clock, ${G4.km} km.`, `Your wingman is attacking ${this.foe.name}, ${G4.km} km ${G4.dir} of you.`, { key: "w-eng", every: 12 });
+      this.say(`engaged, bandit ${G4.clock} o'clock, ${G4.km} km.`, `Your wingman is attacking ${this.foe.name}, ${G4.km} km ${G4.dir}.`, { key: "w-eng", every: 12 });
     }
     if (this.state === "defend" && was !== "defend") this.say("defending, missile on me!", "An enemy missile is chasing your wingman. He turns away from it and drops chaff and flares.", { key: "w-def", every: 15, pri: 3, ttl: 4 });
     this.thinkStrike();
@@ -10114,7 +10252,7 @@ var Wingman = class extends AIJet {
   bank(acc, dt) {
     this.accS.lerp(acc, Math.min(1, dt * 6));
     const V = Math.max(this.vel.length(), 1), vhat = _v15.copy(this.vel).multiplyScalar(1 / V);
-    const lift = _v44.copy(this.accS);
+    const lift = _v45.copy(this.accS);
     lift.y += G0;
     lift.addScaledVector(vhat, -lift.dot(vhat));
     this.gLoad = lift.length() / G0;
@@ -10508,8 +10646,9 @@ var AudioEngine = class {
     this.set(E.crG.gain, ab * (ck ? 0.05 : 0.22) * dist);
     const q = p.q || 0;
     const wind = Math.min(1, Math.sqrt(q) / 260);
-    this.set(E.windF.frequency, 300 + wind * 1800);
-    this.set(E.windG.gain, wind * (ck ? 0.22 : 0.12));
+    const pull = Math.min(1, Math.max(0, (Math.abs(p.gLoad || 1) - 2) / 5)) * wind;
+    this.set(E.windF.frequency, 300 + wind * 1800 - pull * 600);
+    this.set(E.windG.gain, wind * (ck ? 0.22 : 0.12) * (1 + 2 * pull));
     const bf = p.buffet || 0;
     this.set(E.bufG.gain, bf * 0.6);
     this.set(E.tremG.gain, bf * 0.4);
@@ -10987,6 +11126,51 @@ var AudioEngine = class {
     o.stop(t + 2.3);
     this.burst(this.noise.brown, t, 2.2, 0.05, 0.9, "lowpass", 300, 80, this.master);
   }
+  // afterburner light-off: a deep whump (softer inside the cockpit)
+  abLight(cockpit) {
+    if (!this.ready) return;
+    const t = this.now(), k = cockpit ? 0.55 : 1;
+    this.burst(this.noise.brown, t, 0.7, 0.02, 1.1 * k, "lowpass", 520, 90, this.master);
+    const o = this.ctx.createOscillator();
+    o.type = "sine";
+    o.frequency.setValueAtTime(58, t);
+    o.frequency.exponentialRampToValueAtTime(30, t + 0.45);
+    const g = this.gain(0);
+    g.gain.setValueAtTime(1e-4, t);
+    g.gain.exponentialRampToValueAtTime(0.7 * k, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(1e-4, t + 0.6);
+    o.connect(g);
+    g.connect(this.master);
+    o.start(t);
+    o.stop(t + 0.7);
+    o.onended = () => g.disconnect();
+  }
+  // our bullets striking a target: a dry tick so you know the gun is on (rate-limited). It plays over our own gun,
+  // so it sits around 3.6 kHz where the gun noise is weakest, at about the gun's level in that band.
+  hitTick() {
+    if (!this.ready) return;
+    const t = this.now();
+    if (t - (this._tickT ?? -1) < 0.07) return;
+    this._tickT = t;
+    this.beep(3600, 0.02, 0.2, "square", 0, this.master);
+    this.beep(160, 0.05, 0.18, "sine", 0, this.master);
+  }
+  // rounds or fragments hitting our own jet: a metallic bang and a thud through the seat
+  hullHit(k = 1) {
+    if (!this.ready) return;
+    const t = this.now();
+    if (t - (this._hullT ?? -1) < 0.09) return;
+    this._hullT = t;
+    k = Math.min(1.5, Math.max(0.35, k));
+    this.burst(this.noise.white, t, 0.16, 1e-3, 0.7 * k, "bandpass", 2600, 800, this.master);
+    for (const f of [1170, 1660, 2240]) this.beep(f * (0.95 + Math.random() * 0.1), 0.14, 0.035 * k, "triangle", 0, this.master);
+    this.burst(this.noise.brown, t, 0.35, 4e-3, 0.9 * k, "lowpass", 420, 70, this.master);
+  }
+  // enemy destroyed by us
+  killConfirm() {
+    this.beep(988, 0.07, 0.16, "sine", 0.05);
+    this.beep(1319, 0.12, 0.16, "sine", 0.13);
+  }
   touchdown(I = 1) {
     if (!this.ready) return;
     const t = this.now();
@@ -11154,6 +11338,7 @@ var D2R8 = Math.PI / 180;
 var R2D = 180 / Math.PI;
 var _v16 = new THREE23.Vector3();
 var _v210 = new THREE23.Vector3();
+var HUD_HALF_W = 262;
 var HUD = class {
   constructor(canvas) {
     this.c = canvas;
@@ -11171,7 +11356,9 @@ var HUD = class {
     this.dpr = dpr;
     this.W = this.c.width;
     this.H = this.c.height;
-    this.s = this.H / 900;
+    this.s = Math.min(this.H / 900, this.W / 1500);
+    this.cssHalfW = HUD_HALF_W * this.s / dpr;
+    this.topRightCss = 60;
   }
   // world direction -> screen px (null when behind camera)
   proj(cam, dir) {
@@ -11234,11 +11421,13 @@ var HUD = class {
         this.text("MISSILE COMING AT YOUR JET — PRESS M NOW", this.W / 2, this.H * 0.6, "center", 16);
         c2.restore();
       }
-      if (S.wing && S.wing.menu) this.drawWing(S.wing, this.W - 18 * s, 60 * s);
+      const wy = S.wing && S.wing.menu ? this.drawWing(S.wing, this.W - 18 * s, 60 * s) : 80 * s;
+      this.topRightCss = wy / this.dpr;
       this.drawMessages(S);
       return;
     }
     if (S.mode === "defender") {
+      this.topRightCss = 80 * this.s / this.dpr;
       this.drawDefender(S, cam);
       this.drawMessages(S);
       return;
@@ -11715,20 +11904,22 @@ var HUD = class {
   drawOverlay(S, cam) {
     const c = this.ctx, s = this.s, W = this.W, H = this.H;
     if (S.rwr && S.showRwrOverlay) this.drawRWR(c, W - 120 * s, H - 130 * s, 95 * s, S.rwr, s);
-    c.save();
-    c.fillStyle = "rgba(0,0,0,0.35)";
-    c.fillRect(14 * s, H - 64 * s, 470 * s, 50 * s);
-    c.restore();
-    c.fillStyle = "#cfe9ff";
-    this.text(`${S.camLabel || ""}`, 24 * s, H - 50 * s, "left", 12);
-    if (S.detect) {
+    if (S.ias != null) {
       c.save();
-      c.fillStyle = S.detect === "LOCKED" ? "#ff5b4b" : S.detect === "SCANNED" ? "#f3a83a" : "#4fe08a";
-      this.text(`RADAR: ${S.detect === "HIDDEN" ? "NOT SEEN" : S.detect === "SCANNED" ? "SCANNING YOU" : "LOCKED ON YOU"}`, 200 * s, H - 50 * s, "left", 12);
+      c.fillStyle = "rgba(0,0,0,0.35)";
+      c.fillRect(14 * s, H - 64 * s, 470 * s, 50 * s);
       c.restore();
       c.fillStyle = "#cfe9ff";
+      this.text(`${S.camLabel || ""}`, 24 * s, H - 50 * s, "left", 12);
+      if (S.detect) {
+        c.save();
+        c.fillStyle = S.detect === "LOCKED" ? "#ff5b4b" : S.detect === "SCANNED" ? "#f3a83a" : "#4fe08a";
+        this.text(`RADAR: ${S.detect === "HIDDEN" ? "NOT SEEN" : S.detect === "SCANNED" ? "SCANNING YOU" : "LOCKED ON YOU"}`, 200 * s, H - 50 * s, "left", 12);
+        c.restore();
+        c.fillStyle = "#cfe9ff";
+      }
+      this.text(`SPD ${Math.round(S.ias)} KT  ALT ${Math.round(S.alt)} FT  HDG ${String(Math.round(S.heading) % 360).padStart(3, "0")}${S.throttle != null ? `  THR ${Math.round(S.throttle * 100)}%${S.throttle > 0.81 ? " AB" : ""}` : ""}`, 24 * s, H - 30 * s, "left", 12);
     }
-    this.text(`SPD ${Math.round(S.ias)} KT  ALT ${Math.round(S.alt)} FT  HDG ${String(Math.round(S.heading) % 360).padStart(3, "0")}${S.throttle != null ? `  THR ${Math.round(S.throttle * 100)}%${S.throttle > 0.81 ? " AB" : ""}` : ""}`, 24 * s, H - 30 * s, "left", 12);
     let invY = 24 * s;
     if (S.inventory) {
       c.textAlign = "right";
@@ -11738,7 +11929,7 @@ var HUD = class {
         invY += 17 * s;
       }
     }
-    if (S.wing) this.drawWing(S.wing, W - 18 * s, invY + 10 * s);
+    this.topRightCss = (S.wing ? this.drawWing(S.wing, W - 18 * s, invY + 10 * s) : invY) / this.dpr;
     if (S.score != null) {
       c.fillStyle = "#cfe9ff";
       this.text(`KILLS ${S.score}`, 18 * s, 24 * s, "left", 13);
@@ -11760,7 +11951,7 @@ var HUD = class {
       this.text(S.flashMsg, W / 2, H * 0.35, "center", 26);
     }
   }
-  // wingman: what he's doing (right-aligned at x), and the O order menu below it
+  // wingman: what he's doing (right-aligned at x), and the O order menu below it; returns the bottom y
   drawWing(G4, x, y) {
     const c = this.ctx, s = this.s;
     c.save();
@@ -11768,13 +11959,16 @@ var HUD = class {
     c.shadowBlur = 3 * s;
     c.fillStyle = G4.alive ? "#9fffc8" : "#ff9080";
     this.text(`WINGMAN: ${G4.status}`, x, y, "right", 12);
+    let bottom = y + 8 * s;
     if (G4.alive && !G4.menu) {
       c.fillStyle = "#8fb3c8";
       this.text("O = GIVE HIM ORDERS", x, y + 16 * s, "right", 11);
+      bottom = y + 23 * s;
     }
     if (G4.menu) {
       const w = 370 * s, x0 = x - w, h = ((G4.menu.length + 3) * 19 + 14) * s;
       let yy = y + 14 * s;
+      bottom = yy + h;
       c.shadowBlur = 0;
       c.fillStyle = "rgba(7,11,16,0.84)";
       c.fillRect(x0, yy, w, h);
@@ -11802,6 +11996,7 @@ var HUD = class {
       this.text("O = CLOSE", x0 + 12 * s, yy, "left", 11);
     }
     c.restore();
+    return bottom;
   }
   drawMessages(S) {
     const c = this.ctx, s = this.s;
@@ -12167,10 +12362,12 @@ var CameraRig = class {
     this.chaseInit = false;
     this.orbitYaw = 0;
     this.orbitPitch = 0;
-    this.dist = 28;
+    this.dist = 24.5;
     this.fovBase = { cockpit: 72, chase: 58, missile: 55, seeker: 24, defender: 50, dead: 60 };
     this.zoom = 1;
     this.shake = 0;
+    this.shakeT = 0;
+    this.fovKick = 0;
     this.missile = null;
     this.lookBack = false;
   }
@@ -12242,7 +12439,7 @@ var CameraRig = class {
       }
       const k = 38, c = 2 * Math.sqrt(k);
       const vT = this.mode === "dead" ? _v17.set(0, 0, 0) : s.v;
-      const rel = this.chasePos.clone().sub(desired);
+      const rel = this.chasePos.clone().addScaledVector(this.chaseVel, dt).sub(desired);
       const relV = this.chaseVel.clone().sub(vT);
       const acc = rel.multiplyScalar(-k).addScaledVector(relV, -c);
       this.chaseVel.addScaledVector(acc, dt);
@@ -12253,7 +12450,7 @@ var CameraRig = class {
       cam.lookAt(ahead);
       const rollF = this.mode === "dead" ? 0 : 0.25;
       cam.rotateZ(-ac.rollDeg() * Math.PI / 180 * rollF);
-      fov = fov + Math.min(14, spd / 25);
+      fov = fov + Math.min(14, spd / 25) + this.fovKick;
     } else if (this.mode === "missile" && this.missile && !this.missile.dead) {
       const m = this.missile;
       const off = _v17.set(0.9, 0.7, 7 + m.def.d * 10).applyQuaternion(m.quat).add(m.pos);
@@ -12304,13 +12501,21 @@ var CameraRig = class {
       cam.quaternion.copy(D.camQuat);
       fov = 50 * this.zoom;
     }
+    this.shakeT += dt;
     if (shakeAmt > 1e-3) {
-      const a = shakeAmt * 0.012;
-      cam.rotateX((Math.random() - 0.5) * a);
-      cam.rotateY((Math.random() - 0.5) * a);
-      cam.rotateZ((Math.random() - 0.5) * a * 0.5);
+      const a = shakeAmt * 75e-4, t = this.shakeT;
+      const n = (f1, f2, f3, p) => Math.sin(t * f1 + p) * 0.5 + Math.sin(t * f2 + p * 2.3) * 0.3 + Math.sin(t * f3 + p * 4.1) * 0.2;
+      cam.rotateX(n(29, 61, 113, 0.3) * a);
+      cam.rotateY(n(37, 71, 103, 1.9) * a);
+      cam.rotateZ(n(23, 53, 97, 3.7) * a * 0.5);
+    }
+    if (g.player.firingGun && this.mode !== "seeker") {
+      const b = 7e-4;
+      cam.rotateX((Math.random() - 0.5) * b);
+      cam.rotateY((Math.random() - 0.5) * b);
     }
     this.shake *= Math.exp(-dt * 4);
+    this.fovKick *= Math.exp(-dt * 3);
     if (Math.abs(cam.fov - fov) > 0.01) {
       cam.fov += (fov - cam.fov) * Math.min(1, dt * 6);
       cam.updateProjectionMatrix();
@@ -12331,51 +12536,101 @@ var smooth3 = (e0, e1, x) => {
   return t * t * (3 - 2 * t);
 };
 var wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+var EASY = { bankMax: 80, roll0: 50, roll1: 900, levelDelay: 0.2, level0: 30, level1: 3.2, gAuto: 5.5, aim0: 3, aim1: 60, tap: 0.3, tapYaw: 0.35, stopLead: 0.12, fineMax: 0.6, fineLead: 0.45, fineBank: 35, fineT: 1 };
 var FlightAssist = class {
   constructor() {
     this.reset();
   }
   reset() {
     this.bankTgt = 0;
-    this.pull = 0;
     this.dir = 0;
     this.hold = 0;
+    this.tR = 0;
+    this.dA = 0;
+    this.wantP = 0;
+    this.tP = 0;
+    this.fine = null;
+    this.hdgPrev = null;
   }
-  // keys: { left, right, pull, push } booleans; returns { pitch, roll } stick in [-1, 1]
+  // keys: { left, right, pull, push } booleans; returns { pitch, roll, yaw } stick in [-1, 1]
   update(dt, ac, keys) {
+    const E = EASY;
     const theta = ac.pitchDeg() * D2R9;
     const phi = ac.rollDeg() * D2R9;
     const gearDown = ac.gear > 0.5;
-    const bankMax = (gearDown ? 35 : 78) * D2R9;
+    const bankMax = (gearDown ? 35 : E.bankMax) * D2R9;
+    const V = Math.max(ac.tas, 30);
     const auth = smooth3(75 * D2R9, 58 * D2R9, Math.abs(theta));
+    const f = ac.forward(_va), hdg = Math.atan2(f.x, -f.z), v = ac.s.v, w = ac.env.wind;
+    const pathHdg = Math.atan2(v.x - w.x, -(v.z - w.z));
+    const hdgRate = this.hdgPrev == null ? 0 : wrap(hdg - this.hdgPrev) / Math.max(dt, 1e-3);
+    this.hdgPrev = hdg;
     const dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
-    if (dir && dir !== this.dir && Math.sign(this.bankTgt) !== dir) this.bankTgt = clamp2(phi, -bankMax, bankMax) * auth;
+    const p = -ac.s.w.z;
+    if (gearDown || auth < 0.9 || ac.onGround) this.fine = null;
+    if (dir !== this.dir) {
+      if (!dir && this.dir) {
+        const stop = phi + p * E.stopLead;
+        if ((this.bankTgt - stop) * this.dir > 0) this.bankTgt = clamp2(stop, -bankMax, bankMax);
+        if (this.tR <= E.fineMax && auth > 0.9 && !gearDown && !ac.onGround) this.fine = { psi: hdg + hdgRate * E.fineLead, t: 0, phi0: Math.abs(phi) };
+      }
+      this.tR = 0;
+      if (dir) {
+        this.fine = null;
+        if (Math.sign(this.bankTgt) !== dir) this.bankTgt = clamp2(phi, -bankMax, bankMax) * auth;
+      }
+    }
     this.dir = dir;
     const prev = this.bankTgt;
+    let fineYaw = 0;
+    const level = () => {
+      const b = Math.abs(this.bankTgt);
+      this.bankTgt -= Math.sign(this.bankTgt) * Math.min(b, (E.level0 + E.level1 * b / D2R9) * D2R9 * dt);
+    };
     if (dir) {
-      this.bankTgt = clamp2(this.bankTgt + dir * 220 * D2R9 * dt, -bankMax, bankMax);
-      this.hold = 0.18;
-    } else if ((this.hold -= dt) <= 0) this.bankTgt -= Math.sign(this.bankTgt) * Math.min(Math.abs(this.bankTgt), 260 * D2R9 * dt);
+      this.tR += dt;
+      const r = Math.sign(this.bankTgt) === -dir ? 260 : E.roll0 + E.roll1 * this.tR;
+      this.bankTgt = clamp2(this.bankTgt + dir * r * D2R9 * dt, -bankMax, bankMax);
+      this.hold = E.levelDelay;
+    } else if (keys.pull && !gearDown && Math.abs(this.bankTgt) > 25 * D2R9) {
+      this.hold = E.levelDelay;
+      this.fine = null;
+    } else if (this.fine) {
+      const F = this.fine;
+      F.t += dt;
+      const ePath = wrap(F.psi - pathHdg), eNose = wrap(F.psi - hdg);
+      const want2 = clamp2(Math.atan(V * ePath / (G02 * E.fineT)), -E.fineBank * D2R9, E.fineBank * D2R9);
+      const step = (E.level0 + E.level1 * Math.abs(this.bankTgt) / D2R9) * D2R9 * dt;
+      this.bankTgt += clamp2(want2 - this.bankTgt, -step, step);
+      fineYaw = clamp2((3 * eNose - 0.3 * hdgRate) / (9 * D2R9), -0.6, 0.6);
+      if (F.t > 4 || Math.abs(ePath) < 0.05 * D2R9 && Math.abs(eNose) < 0.1 * D2R9 || Math.abs(phi) > Math.max(F.phi0, E.fineBank * D2R9) + 30 * D2R9) this.fine = null;
+    } else if ((this.hold -= dt) <= 0) level();
     const tgtRate = (this.bankTgt - prev) / Math.max(dt, 1e-3);
-    const p = -ac.s.w.z;
     let err = this.bankTgt - (phi + p * 0.16);
     err = Math.atan2(Math.sin(err), Math.cos(err));
     let pDes = tgtRate + 4 * err;
     pDes = clamp2(pDes, -200 * D2R9, 200 * D2R9);
     let roll = pDes / Math.max(ac.rollRateMax(), 0.2);
     roll = roll * auth + dir * 0.7 * (1 - auth);
-    const want = (keys.pull ? 1 : 0) - (keys.push ? 1 : 0);
-    if (want) this.pull = clamp2(this.pull + want * 2.6 * dt, -1, 1);
-    else this.pull -= Math.sign(this.pull) * Math.min(Math.abs(this.pull), 7 * dt);
     const phiEff = phi + clamp2(this.bankTgt - phi, -25 * D2R9, 25 * D2R9) * 0.5;
     const cphi = Math.cos(phiEff);
-    let nAuto = Math.cos(theta) * (cphi > 0.2 ? 1 / cphi : 1);
-    nAuto = Math.min(nAuto, gearDown ? 1.6 : 4.6) * auth + Math.cos(theta) * (1 - auth);
+    let nAuto = cphi > 0.05 ? Math.cos(theta) / Math.max(cphi, 1 / E.gAuto) : Math.cos(theta);
+    nAuto = Math.min(nAuto, gearDown ? 1.6 : E.gAuto) * auth + Math.cos(theta) * (1 - auth);
     if (Math.abs(phi) > 100 * D2R9) nAuto = 0;
-    const spAuto = ac.stickForG(nAuto);
-    const pc = this.pull * Math.abs(this.pull) * 0.55 + this.pull * 0.45;
-    const pitch = pc >= 0 ? spAuto + pc * (1 - spAuto) : spAuto + pc * (1 + spAuto);
-    const yaw = clamp2(err * 1.1, -0.45, 0.45) * auth * (dir ? 1 : 0.4);
+    const zA = Math.max(ac.qbar * JET.S * 4.58 / (ac.mass * G02), 1);
+    const want = (keys.pull ? 1 : 0) - (keys.push ? 1 : 0);
+    this.tP = want && want === this.wantP ? this.tP + dt : 0;
+    this.wantP = want;
+    if (want) {
+      const r = Math.sign(this.dA) === -want ? Math.max(40, E.aim0 + E.aim1 * this.tP) : E.aim0 + E.aim1 * this.tP;
+      this.dA += want * r * D2R9 * dt;
+    } else this.dA *= Math.exp(-dt / clamp2(V / (G02 * zA), 0.2, 1));
+    const nLo = gearDown ? nAuto - 1.2 : -3, nHi = gearDown ? nAuto + 1.2 : 7.5;
+    this.dA = clamp2(this.dA, (nLo - nAuto) / zA, Math.min((nHi - nAuto) / zA, Math.max(0, 31 * D2R9 - nAuto / zA)));
+    const pitch = ac.stickForG(nAuto + zA * this.dA);
+    let yaw = clamp2(err * 1.1, -0.45, 0.45) * auth * (dir ? 1 : 0.4);
+    if (dir && this.tR < E.tap && !gearDown) yaw = dir * E.tapYaw * Math.min(1, this.tR / 0.06) * (1 - this.tR / E.tap) + yaw * (this.tR / E.tap);
+    if (this.fine) yaw = fineYaw * auth;
     return { pitch: clamp2(pitch, -1, 1), roll: clamp2(roll, -1, 1), yaw };
   }
 };
@@ -12383,7 +12638,7 @@ var ON_SPEED_AOA = 8.1;
 var JOIN_RANGE = 2e4;
 var MIL = 0.8;
 var PATTERN_KT = 180;
-var OUT_BACK = 9e3;
+var PATTERN = { back: 7e3, side: 2e3 };
 var _f = new THREE25.Vector3();
 var _jp = new THREE25.Vector3();
 var clApproach = (aDeg, flap) => 0.08 * aDeg + 0.32 * flap - 0.02;
@@ -12480,15 +12735,15 @@ var LandingAssist = class {
   // the green "fly here" circle (gear down, assist off), a little like the legs of a real landing pattern. Behind the
   // ship and not too far off to the side ('final') it slides along the extended centre line, ahead of the jet and on
   // the glide slope: flying straight at it cuts in toward the landing line at about 30° and then eases onto it, on the
-  // glide path, which is where the assist takes over. From anywhere else ('out') it waits 9 km behind the ship, 2.5 km
-  // off to the jet's side, so a jet coming from ahead or beside the ship first flies past it, then turns in.
+  // glide path, which is where the assist takes over. From anywhere else ('out') it waits behind the ship and off to the
+  // jet's side (PATTERN), so a jet coming from ahead or beside the ship first flies past it, then turns in.
   joinPoint(g, out) {
     const ops = g.ops, x = ops.rangeToTD, y = ops.latErr, ay = Math.abs(y);
     if (ay > 400) this.side = Math.sign(y);
-    const outP = g.approachPoint(OUT_BACK, this.side * 2500, out);
+    const outP = g.approachPoint(PATTERN.back, this.side * PATTERN.side, out);
     if (this.leg === "final") {
       if (x < 1500 || ay > 0.6 * x - 600) this.leg = "out";
-    } else if (ay < 0.6 * x - 1300 && (ops.vAlong > 0 || x > OUT_BACK - 500 || outP.distanceTo(g.player.ac.s.p) < 1500)) this.leg = "final";
+    } else if (ay < 0.6 * x - 1300 && (ops.vAlong > 0 || x > PATTERN.back - 500 || outP.distanceTo(g.player.ac.s.p) < 1500)) this.leg = "final";
     return this.leg === "final" ? g.approachPoint(x - Math.max(2e3, 1.6 * ay), 0, out) : outP;
   }
   // gear down near the ship and the assist not flying yet: what to do so it takes over (see canCapture), as
@@ -12835,7 +13090,7 @@ var Radio = class {
     this.call(
       "awacs",
       `${CS}, ${what}, your ${G4.clock} o'clock${many ? ", multiple missiles" : ""}!`,
-      `${plainWhat} from ${G4.dir} (${G4.clock} o'clock). Follow the BREAK cue and press X when it says NOW.`,
+      `${plainWhat} from ${G4.dir.replace(/^to /, "")} (${G4.clock} o'clock). Follow the BREAK cue and press X when it says NOW.`,
       { key: "launch", every: 6, pri: 6, urgent: true, ttl: 4, say: `${SAY_CS}, ${sayWhat}, ${NUMW2[G4.clock]} o'clock!` }
     );
   }
@@ -14057,13 +14312,14 @@ var Game = class {
     const p = e.pos.clone();
     const byWing = !!(src && src.isWingman);
     if (e instanceof AIJet) {
-      this.fx.explosion(p, 4.5, { surface: "air" });
+      this.fx.explosion(p, 4.5, { surface: "air", fuel: true });
       e.onDestroyedVisual();
       if (e.isWingman) this.wingmanLost(src);
       else if (byPlayer) {
         this.kills++;
         this.msg(`ENEMY JET DOWN — ${e.name}`, 3, "#ffe680");
         this.comms.killed(e);
+        this.audio.killConfirm();
       } else if (byWing) src.creditKill(e);
       else if (src && src.kind === "ship" && src.team === "blue") {
         this.msg(`OUR SHIP ${src.name} SHOT DOWN ${e.name}`, 3, "#b0ffb0");
@@ -14083,6 +14339,7 @@ var Game = class {
         this.kills++;
         this.msg(`WARSHIP SUNK — ${tagOf(e)}`, 3.5, "#ffe680");
         this.comms.killed(e);
+        this.audio.killConfirm();
       } else if (byWing && e.team === "red") src.creditKill(e);
     } else {
       const size = e.kind === "structure" ? 6 : 5;
@@ -14105,6 +14362,7 @@ var Game = class {
         this.kills++;
         this.msg(`TARGET DESTROYED — ${tagOf(e)}`, 3, "#ffe680");
         this.comms.killed(e);
+        this.audio.killConfirm();
       } else if (byWing && !e.isBunker && e.team === "red") src.creditKill(e);
       if (e.isBunker) this.kills++;
     }
@@ -14139,7 +14397,7 @@ var Game = class {
     this.audio.setSeekerTone(0);
     if (crash) this.wreckImpact(p, crash.kind === "water");
     else {
-      this.fx.explosion(p, 7, { surface: "air" });
+      this.fx.explosion(p, 7, { surface: "air", fuel: true });
       P.wreck = { v: ac.s.v.clone().multiplyScalar(0.85).add(new THREE28.Vector3(0, -45, 0)), spin: new THREE28.Vector3((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 6), fire: this.fx.addFire(p, 1.4, 60, { follow: () => P.wreckPos }), trail: this.fx.trails.create({ kind: "smoke", width: 3, grow: 2.2, maxAge: 14, opacity: 0.85, color: [0.1, 0.1, 0.1] }) };
       for (let i = 0; i < 14; i++) {
         const d = new THREE28.Vector3(Math.random() - 0.5, Math.random() - 0.3, Math.random() - 0.5).normalize();
@@ -14158,8 +14416,8 @@ var Game = class {
   // fuel-fed impact: fireball, flying wreckage, crater and a burning wreck (or a big splash at sea)
   wreckImpact(p, water) {
     const P = this.player;
-    this.fx.explosion(p.clone(), 9, { surface: water ? "water" : "ground", water });
-    setTimeout(() => this.fx.explosion(p.clone().add(new THREE28.Vector3(0, 8, 0)), 7, { surface: water ? "water" : "target" }), 180);
+    this.fx.explosion(p.clone(), 9, { surface: water ? "water" : "ground", water, fuel: true });
+    setTimeout(() => this.fx.explosion(p.clone().add(new THREE28.Vector3(0, 8, 0)), 7, { surface: water ? "water" : "target", fuel: true }), 180);
     for (let i = 0; i < 26; i++) {
       const d = new THREE28.Vector3(Math.random() - 0.5, 0.3 + Math.random() * 0.7, Math.random() - 0.5).normalize();
       this.fx.debris.spawn(p, d.multiplyScalar(14 + Math.random() * 34), 0.35 + Math.random() * 1.2, 8 + Math.random() * 10, Math.random() < 0.55);
@@ -14695,6 +14953,16 @@ var Game = class {
       }
       this.wasSup = sup;
     }
+    const abLit = P.alive && !this.attract && ac.ab > 0.06;
+    if (abLit && !this.abWasLit && this.time - (this.abOffT ?? -9) > 0.8) {
+      this.audio.abLight(this.rig.mode === "cockpit");
+      if (this.rig.mode === "chase") {
+        this.rig.fovKick = 2.5;
+        this.rig.shake = Math.max(this.rig.shake, 0.35);
+      }
+    }
+    if (!abLit && this.abWasLit) this.abOffT = this.time;
+    this.abWasLit = abLit;
   }
   warnings() {
     const P = this.player, ac = P.ac;
@@ -14810,7 +15078,7 @@ var Game = class {
       this.hud.draw({ hidden: true }, cam);
       return;
     }
-    const S = { messages: this.msgs, mode: mode === "seeker" ? "seeker" : "normal", leftInset: this.attract ? 0 : 388 };
+    const S = { messages: this.msgs, mode: mode === "seeker" ? "seeker" : "normal", leftInset: this.attract ? 0 : (this.cardRight || 404) + 12 };
     const W = this.wingman;
     if (W && P.alive) {
       const T = this.wingMenu && W.alive ? W.playerTarget() : null;
@@ -15117,9 +15385,14 @@ var esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;
 var kb = (...keys) => keys.map((x) => `<kbd>${esc(x)}</kbd>`).join("");
 var GROUND_WEAPONS = /* @__PURE__ */ new Set(["agm65", "agm84", "agm88", "gbu12", "gbu31", "gbu39", "mk84", "cbu"]);
 var GROUND_KINDS2 = /* @__PURE__ */ new Set(["ground", "sam", "structure", "ship"]);
+var CARD_MIN_W = 280;
+var CARD_MAX_W = 388;
+var KEYS_FOLD_GAP = 10;
+var KEYS_UNFOLD_GAP = 30;
 var Guide = class {
   constructor(game, doc = document) {
     this.g = game;
+    this.doc = doc;
     this.coach = doc.getElementById("coach");
     this.keysCard = doc.getElementById("keys-card");
     this.last = "";
@@ -15134,10 +15407,24 @@ var Guide = class {
       open = true;
     }
     this.keysOpen = open;
+    this.keysFolded = false;
+    this.keysForced = false;
+    this.keysH = 0;
+    this.measuredAt = "";
+    this.cardW = 0;
     this.applyKeys();
   }
+  keysShown() {
+    return this.keysOpen && (!this.keysFolded || this.keysForced);
+  }
   toggleKeys() {
-    this.keysOpen = !this.keysOpen;
+    if (this.keysShown()) {
+      this.keysOpen = false;
+      this.keysForced = false;
+    } else {
+      this.keysOpen = true;
+      this.keysForced = this.keysFolded;
+    }
     this.applyKeys();
     try {
       localStorage.setItem("aegis-keys-open", this.keysOpen ? "1" : "0");
@@ -15145,7 +15432,7 @@ var Guide = class {
     }
   }
   applyKeys() {
-    this.keysCard.classList.toggle("collapsed", !this.keysOpen);
+    this.keysCard.classList.toggle("collapsed", !this.keysShown());
   }
   update(dt) {
     const g = this.g;
@@ -15154,6 +15441,7 @@ var Guide = class {
     this.keysCard.hidden = !show;
     if (!show) {
       this.last = "";
+      this.keysForced = false;
       return;
     }
     if (g.input.hit("Tab")) this.toggleKeys();
@@ -15167,6 +15455,36 @@ var Guide = class {
     if (html !== this.last) {
       this.coach.innerHTML = html;
       this.last = html;
+    }
+    this.layout();
+  }
+  // Card width: as wide as the gap left of the HUD allows. The controls card folds to its one-line form while the
+  // coach would run into it (short windows, long alerts) and comes back when there is room again.
+  layout() {
+    const K = this.keysCard, root = this.doc.documentElement;
+    if (!K.getBoundingClientRect || !this.coach.getBoundingClientRect || !root) return;
+    const W = innerWidth, H = innerHeight, half = this.g.hud ? this.g.hud.cssHalfW : 0;
+    const cw = Math.round(Math.min(W - 32, Math.max(CARD_MIN_W, Math.min(CARD_MAX_W, W / 2 - half - 26))));
+    if (cw !== this.cardW) {
+      this.cardW = cw;
+      root.style.setProperty("--card-w", `${cw}px`);
+    }
+    this.g.cardRight = 16 + cw;
+    const at = `${cw}x${H}:${Math.floor(performance.now() / 3e3)}`;
+    if (!K.classList.contains("collapsed")) {
+      this.keysH = K.getBoundingClientRect().height;
+      this.measuredAt = at;
+    } else if (this.measuredAt !== at) {
+      K.classList.remove("collapsed");
+      this.keysH = K.getBoundingClientRect().height;
+      this.measuredAt = at;
+      K.classList.add("collapsed");
+    }
+    const coachBottom = this.coach.getBoundingClientRect().bottom, keysTop = K.getBoundingClientRect().bottom - this.keysH;
+    const fold = coachBottom + (this.keysFolded ? KEYS_UNFOLD_GAP : KEYS_FOLD_GAP) > keysTop;
+    if (fold !== this.keysFolded) {
+      this.keysFolded = fold;
+      this.applyKeys();
     }
   }
   // where something is, in words: "6.2 km, 40° to your right"
@@ -15488,18 +15806,23 @@ var Guide = class {
 };
 
 // src/ui/comms.js
+var RADIO_MIN_W = 300;
+var RADIO_MAX_W = 460;
 var CommsView = class {
   constructor(game) {
     this.g = game;
     this.el = document.getElementById("radio");
     this.ver = -1;
     this.nodes = /* @__PURE__ */ new Map();
+    this.top = -1;
+    this.w = -1;
   }
   update() {
     const g = this.g, R = g.comms, el = this.el;
     if (!el || !R) return;
     const show = !g.attract && R.active.length > 0;
     if (el.hidden === show) el.hidden = !show;
+    if (show && g.hud) this.place(g.hud);
     if (R.ver !== this.ver) {
       this.ver = R.ver;
       this.render(R.active);
@@ -15513,6 +15836,19 @@ var CommsView = class {
         n._live = live;
         n.classList.toggle("live", live);
       }
+    }
+  }
+  // under the weapon list / wingman text at the top right, and no wider than the gap beside the HUD
+  place(hud) {
+    const top = Math.round(Math.max(hud.topRightCss + 12, innerHeight * 0.064 + 12));
+    const w = Math.round(Math.min(innerWidth - 32, Math.max(RADIO_MIN_W, Math.min(RADIO_MAX_W, innerWidth / 2 - hud.cssHalfW - 32))));
+    if (top !== this.top) {
+      this.top = top;
+      this.el.style.top = `${top}px`;
+    }
+    if (w !== this.w) {
+      this.w = w;
+      this.el.style.width = `${w}px`;
     }
   }
   render(list) {
@@ -16013,7 +16349,7 @@ var Briefing = class {
       <section class="bf-sec"><h3>Threats</h3>${threats}</section>
       <section class="bf-sec"><h3>Staying alive</h3><ul class="bf-tips">${B.tips.map((t) => `<li>${kbd(esc2(t))}</li>`).join("")}</ul></section>
       ${scenario === "approach" ? "" : `<section class="bf-sec"><h3>Your wingman</h3><p>${kbd(esc2(scenario === "air" ? WING_AIR : WING_STRIKE))}</p></section>`}
-      <section class="bf-sec"><h3>Radio</h3><p>You are <b>SPEAR 1-1</b>${scenario === "approach" ? "" : ", your wingman is <b>SPEAR 1-2</b>"}. <b>MAGIC</b> is the radar plane that watches the sky for you, <b>MOTHER</b> is the carrier, <b>PADDLES</b> the landing officer. Every call shows up at the bottom of the screen with what it means in plain English.</p></section>`;
+      <section class="bf-sec"><h3>Radio</h3><p>You are <b>SPEAR 1-1</b>${scenario === "approach" ? "" : ", your wingman is <b>SPEAR 1-2</b>"}. <b>MAGIC</b> is the radar plane that watches the sky for you, <b>MOTHER</b> is the carrier, <b>PADDLES</b> the landing officer. Every call shows up on the right of the screen with what it means in plain English.</p></section>`;
     const inv = g.player.inventory().map((it) => it.key === "C" ? `${it.name} gun, ${it.n} rounds` : `${it.n}× ${it.name}`);
     const hr = g.sky.hours ?? 9.5, hh = Math.floor(hr), mm = Math.round((hr - hh) * 60);
     const w = g.wind, wkt = Math.round(Math.hypot(w.x, w.z) * 1.944), wfrom = Math.round((Math.atan2(-w.x, w.z) * 180 / Math.PI + 360) % 360);
@@ -16206,6 +16542,12 @@ async function boot() {
   });
   const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
   const esc3 = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const failTip = (rep) => {
+    if (/GROUND/.test(rep.headline)) return "Tip: when the jet says PULL UP, hold S straight away. Over the hills, keep ALT above 3,000 ft unless you are hiding from radar.";
+    if (/SEA/.test(rep.headline)) return "Tip: when the jet says PULL UP, hold S straight away. Low over water it is hard to judge height: keep ALT above 500 ft.";
+    if (/SHIP/.test(rep.headline)) return "Tip: to land, put the gear down (G) and fly to the green circle behind the ship. The landing assist then flies the approach with you.";
+    return rep.kind === "strike" ? "Tip: fire anti-radar missiles (5) from 20–30 km before you close in, and tap X/Z when a missile is coming. Ticking Practice in the menu lets you learn the run without being shot down." : "Tip: lock with T, fire the radar missile (2) from 15–25 km, then turn hard and drop flares (X) if one comes back at you.";
+  };
   game.mission.onEnd = (rep) => {
     game.paused = true;
     game.audio.setPaused(true);
@@ -16213,7 +16555,7 @@ async function boot() {
     D.classList.toggle("fail", !rep.success);
     $("db-kicker").textContent = rep.success ? "MISSION COMPLETE" : "MISSION FAILED";
     $("db-title").textContent = rep.headline;
-    $("db-grade").textContent = rep.success ? `Grade ${rep.grade}` : rep.kind === "strike" ? "Tip: fire anti-radar missiles (5) from 20–30 km before you close in, and tap X/Z when a missile is coming. Ticking Practice in the menu lets you learn the run without being shot down." : "Tip: lock with T, fire the radar missile (2) from 15–25 km, then turn hard and drop flares (X) if one comes back at you.";
+    $("db-grade").textContent = rep.success ? `Grade ${rep.grade}` : failTip(rep);
     $("db-time").textContent = fmtTime(rep.time);
     $("db-kills").textContent = rep.kills;
     $("db-hp").textContent = `${Math.max(0, Math.round(rep.hp))}%`;

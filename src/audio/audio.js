@@ -121,7 +121,9 @@ export class AudioEngine {
     this.set(E.abG.gain, ab * (ck ? 0.9 : 1.3) * dist); this.set(E.subG.gain, ab * 0.45 * dist);
     this.set(E.crG.gain, ab * (ck ? 0.05 : 0.22) * dist);
     const q = p.q || 0; const wind = Math.min(1, Math.sqrt(q) / 260);
-    this.set(E.windF.frequency, 300 + wind * 1800); this.set(E.windG.gain, wind * (ck ? 0.22 : 0.12));
+    // pulling hard: the air over the wings roars louder and deeper
+    const pull = Math.min(1, Math.max(0, (Math.abs(p.gLoad || 1) - 2) / 5)) * wind;
+    this.set(E.windF.frequency, 300 + wind * 1800 - pull * 600); this.set(E.windG.gain, wind * (ck ? 0.22 : 0.12) * (1 + 2 * pull));
     const bf = p.buffet || 0; this.set(E.bufG.gain, bf * 0.6); this.set(E.tremG.gain, bf * 0.4);
     this.set(E.turbG.gain, ((p.gearDown ? 0.6 : 0) + (p.airbrake || 0)) * wind * 0.35);
     this.set(E.extF.frequency, ck ? 2500 : 20000, 0.1);
@@ -333,6 +335,30 @@ export class AudioEngine {
     o.connect(f); f.connect(g); g.connect(this.master); o.start(t); o.stop(t + 2.3);
     this.burst(this.noise.brown, t, 2.2, 0.05, 0.9, 'lowpass', 300, 80, this.master);
   }
+  // afterburner light-off: a deep whump (softer inside the cockpit)
+  abLight(cockpit) {
+    if (!this.ready) return; const t = this.now(), k = cockpit ? 0.55 : 1;
+    this.burst(this.noise.brown, t, 0.7, 0.02, 1.1 * k, 'lowpass', 520, 90, this.master);
+    const o = this.ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(58, t); o.frequency.exponentialRampToValueAtTime(30, t + 0.45);
+    const g = this.gain(0); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.7 * k, t + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.7); o.onended = () => g.disconnect();
+  }
+  // our bullets striking a target: a dry tick so you know the gun is on (rate-limited). It plays over our own gun,
+  // so it sits around 3.6 kHz where the gun noise is weakest, at about the gun's level in that band.
+  hitTick() {
+    if (!this.ready) return; const t = this.now(); if (t - (this._tickT ?? -1) < 0.07) return; this._tickT = t;
+    this.beep(3600, 0.02, 0.2, 'square', 0, this.master); this.beep(160, 0.05, 0.18, 'sine', 0, this.master);
+  }
+  // rounds or fragments hitting our own jet: a metallic bang and a thud through the seat
+  hullHit(k = 1) {
+    if (!this.ready) return; const t = this.now(); if (t - (this._hullT ?? -1) < 0.09) return; this._hullT = t;
+    k = Math.min(1.5, Math.max(0.35, k));
+    this.burst(this.noise.white, t, 0.16, 0.001, 0.7 * k, 'bandpass', 2600, 800, this.master);
+    for (const f of [1170, 1660, 2240]) this.beep(f * (0.95 + Math.random() * 0.1), 0.14, 0.035 * k, 'triangle', 0, this.master);
+    this.burst(this.noise.brown, t, 0.35, 0.004, 0.9 * k, 'lowpass', 420, 70, this.master);
+  }
+  // enemy destroyed by us
+  killConfirm() { this.beep(988, 0.07, 0.16, 'sine', 0.05); this.beep(1319, 0.12, 0.16, 'sine', 0.13); }
   touchdown(I = 1) { if (!this.ready) return; const t = this.now(); this.burst(this.noise.brown, t, 0.4, 0.002, 0.9 * I, 'lowpass', 400, 80, this.master); this.burst(this.noise.white, t, 0.12, 0.002, 0.35 * I, 'bandpass', 1200, 500, this.master); }
   gearMotor() { if (!this.ready) return; const t = this.now(); const o = this.ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(140, t); o.frequency.linearRampToValueAtTime(190, t + 2.5); const f = this.filt('lowpass', 600); const g = this.gain(0); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06, t + 0.2); g.gain.exponentialRampToValueAtTime(0.0001, t + 3.2); o.connect(f); f.connect(g); g.connect(this.master); o.start(t); o.stop(t + 3.3); this.beep(90, 0.15, 0.3, 'sine', 3.1, this.master); }
   hookMotor() { this.gearMotor(); }

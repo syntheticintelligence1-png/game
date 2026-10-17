@@ -9,9 +9,9 @@ export class CameraRig {
   constructor(camera) {
     this.cam = camera; this.mode = 'chase'; this.prevMode = 'chase';
     this.headYaw = 0; this.headPitch = 0; this.headOff = new THREE.Vector3(); this.headVel = new THREE.Vector3();
-    this.chasePos = new THREE.Vector3(); this.chaseVel = new THREE.Vector3(); this.chaseInit = false; this.orbitYaw = 0; this.orbitPitch = 0; this.dist = 28;
+    this.chasePos = new THREE.Vector3(); this.chaseVel = new THREE.Vector3(); this.chaseInit = false; this.orbitYaw = 0; this.orbitPitch = 0; this.dist = 24.5;
     this.fovBase = { cockpit: 72, chase: 58, missile: 55, seeker: 24, defender: 50, dead: 60 };
-    this.zoom = 1; this.shake = 0; this.missile = null; this.lookBack = false;
+    this.zoom = 1; this.shake = 0; this.shakeT = 0; this.fovKick = 0; this.missile = null; this.lookBack = false;
   }
   setMode(m) { if (m !== this.mode) { this.prevMode = this.mode; this.mode = m; this.chaseInit = false; this.zoom = 1; } }
 
@@ -56,10 +56,12 @@ export class CameraRig {
       const off = _v2.set(0, this.mode === 'dead' ? 3.2 : 4.2, d).applyQuaternion(_q);
       const desired = off.add(target);
       if (!this.chaseInit) { this.chasePos.copy(desired); this.chaseVel.set(0, 0, 0); this.chaseInit = true; }
-      // spring-damper relative to the moving target (critically damped)
+      // spring-damper relative to the moving target (critically damped). The jet has already moved this frame, so the
+      // error is taken from where the camera would be by now: without that the camera settles speed × frame time too
+      // close (4 m at 60 fps, 12 m at 20 fps).
       const k = 38, c = 2 * Math.sqrt(k);
       const vT = this.mode === 'dead' ? _v.set(0, 0, 0) : s.v;
-      const rel = this.chasePos.clone().sub(desired); const relV = this.chaseVel.clone().sub(vT);
+      const rel = this.chasePos.clone().addScaledVector(this.chaseVel, dt).sub(desired); const relV = this.chaseVel.clone().sub(vT);
       const acc = rel.multiplyScalar(-k).addScaledVector(relV, -c);
       this.chaseVel.addScaledVector(acc, dt); this.chasePos.addScaledVector(this.chaseVel, dt);
       cam.position.copy(this.chasePos);
@@ -69,7 +71,7 @@ export class CameraRig {
       // partial roll follow
       const rollF = this.mode === 'dead' ? 0 : 0.25;
       cam.rotateZ(-ac.rollDeg() * Math.PI / 180 * rollF);
-      fov = fov + Math.min(14, spd / 25);
+      fov = fov + Math.min(14, spd / 25) + this.fovKick;
     } else if (this.mode === 'missile' && this.missile && !this.missile.dead) {
       const m = this.missile;
       const off = _v.set(0.9, 0.7, 7 + m.def.d * 10).applyQuaternion(m.quat).add(m.pos);
@@ -108,11 +110,17 @@ export class CameraRig {
     } else if (this.mode === 'defender' && g.defender) {
       const D = g.defender; cam.position.copy(D.eyePos); cam.quaternion.copy(D.camQuat); fov = 50 * this.zoom;
     }
-    // shake
+    // shake: smooth noise (a few unrelated sines, 4-18 Hz) so it rattles the same at any frame rate; the gun adds a
+    // fine buzz on top
+    this.shakeT += dt;
     if (shakeAmt > 0.001) {
-      const a = shakeAmt * 0.012; cam.rotateX((Math.random() - 0.5) * a); cam.rotateY((Math.random() - 0.5) * a); cam.rotateZ((Math.random() - 0.5) * a * 0.5);
+      const a = shakeAmt * 0.0075, t = this.shakeT;
+      const n = (f1, f2, f3, p) => Math.sin(t * f1 + p) * 0.5 + Math.sin(t * f2 + p * 2.3) * 0.3 + Math.sin(t * f3 + p * 4.1) * 0.2;
+      cam.rotateX(n(29, 61, 113, 0.3) * a); cam.rotateY(n(37, 71, 103, 1.9) * a); cam.rotateZ(n(23, 53, 97, 3.7) * a * 0.5);
     }
+    if (g.player.firingGun && this.mode !== 'seeker') { const b = 0.0007; cam.rotateX((Math.random() - 0.5) * b); cam.rotateY((Math.random() - 0.5) * b); }
     this.shake *= Math.exp(-dt * 4);
+    this.fovKick *= Math.exp(-dt * 3);
     if (Math.abs(cam.fov - fov) > 0.01) { cam.fov += (fov - cam.fov) * Math.min(1, dt * 6); cam.updateProjectionMatrix(); }
     cam.updateMatrixWorld();
   }

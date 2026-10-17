@@ -489,9 +489,9 @@ export class Game {
     const p = e.pos.clone();
     const byWing = !!(src && src.isWingman);
     if (e instanceof AIJet) {
-      this.fx.explosion(p, 4.5, { surface: 'air' }); e.onDestroyedVisual();
+      this.fx.explosion(p, 4.5, { surface: 'air', fuel: true }); e.onDestroyedVisual();
       if (e.isWingman) this.wingmanLost(src);
-      else if (byPlayer) { this.kills++; this.msg(`ENEMY JET DOWN — ${e.name}`, 3, '#ffe680'); this.comms.killed(e); }
+      else if (byPlayer) { this.kills++; this.msg(`ENEMY JET DOWN — ${e.name}`, 3, '#ffe680'); this.comms.killed(e); this.audio.killConfirm(); }
       else if (byWing) src.creditKill(e);
       else if (src && src.kind === 'ship' && src.team === 'blue') {
         this.msg(`OUR SHIP ${src.name} SHOT DOWN ${e.name}`, 3, '#b0ffb0');
@@ -503,7 +503,7 @@ export class Game {
       this.fx.explosion(p.add(new THREE.Vector3(0, 10, 0)), 9, { surface: 'target' });
       if (e.ship) { e.ship.alive = false; e.ship.sinkPitch = (Math.random() - 0.5) * 0.15; e.ship.sinkRoll = (Math.random() - 0.5) * 0.5; }
       this.fx.addFire(e.pos.clone().add(new THREE.Vector3(0, 12, 0)), 3, 400, { follow: () => e.ship.root.position.clone().add(new THREE.Vector3(0, 12, 0)) });
-      if (byPlayer) { this.kills++; this.msg(`WARSHIP SUNK — ${tagOf(e)}`, 3.5, '#ffe680'); this.comms.killed(e); }
+      if (byPlayer) { this.kills++; this.msg(`WARSHIP SUNK — ${tagOf(e)}`, 3.5, '#ffe680'); this.comms.killed(e); this.audio.killConfirm(); }
       else if (byWing && e.team === 'red') src.creditKill(e);
     } else {
       const size = e.kind === 'structure' ? 6 : 5;
@@ -517,7 +517,7 @@ export class Game {
       const tur = e.model && e.model.nodes && e.model.nodes.turret;
       if (tur && Math.random() < 0.7) this.popTurret(e, tur);
       if (e.radar) e.radar.on = false;
-      if (byPlayer && !e.isBunker) { this.kills++; this.msg(`TARGET DESTROYED — ${tagOf(e)}`, 3, '#ffe680'); this.comms.killed(e); }
+      if (byPlayer && !e.isBunker) { this.kills++; this.msg(`TARGET DESTROYED — ${tagOf(e)}`, 3, '#ffe680'); this.comms.killed(e); this.audio.killConfirm(); }
       else if (byWing && !e.isBunker && e.team === 'red') src.creditKill(e);
       if (e.isBunker) this.kills++;
     }
@@ -541,7 +541,7 @@ export class Game {
     if (crash) this.wreckImpact(p, crash.kind === 'water');
     else {
       // shot down in the air: the airframe breaks up and the burning wreck tumbles down until it hits the ground
-      this.fx.explosion(p, 7, { surface: 'air' });
+      this.fx.explosion(p, 7, { surface: 'air', fuel: true });
       P.wreck = { v: ac.s.v.clone().multiplyScalar(0.85).add(new THREE.Vector3(0, -45, 0)), spin: new THREE.Vector3((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 6), fire: this.fx.addFire(p, 1.4, 60, { follow: () => P.wreckPos }), trail: this.fx.trails.create({ kind: 'smoke', width: 3, grow: 2.2, maxAge: 14, opacity: 0.85, color: [0.1, 0.1, 0.1] }) };
       for (let i = 0; i < 14; i++) { const d = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.3, Math.random() - 0.5).normalize(); this.fx.debris.spawn(p, d.multiplyScalar(15 + Math.random() * 30).addScaledVector(ac.s.v, 0.8), 0.3 + Math.random() * 0.9, 8 + Math.random() * 6, Math.random() < 0.6); }
     }
@@ -554,8 +554,8 @@ export class Game {
   // fuel-fed impact: fireball, flying wreckage, crater and a burning wreck (or a big splash at sea)
   wreckImpact(p, water) {
     const P = this.player;
-    this.fx.explosion(p.clone(), 9, { surface: water ? 'water' : 'ground', water });
-    setTimeout(() => this.fx.explosion(p.clone().add(new THREE.Vector3(0, 8, 0)), 7, { surface: water ? 'water' : 'target' }), 180);
+    this.fx.explosion(p.clone(), 9, { surface: water ? 'water' : 'ground', water, fuel: true });
+    setTimeout(() => this.fx.explosion(p.clone().add(new THREE.Vector3(0, 8, 0)), 7, { surface: water ? 'water' : 'target', fuel: true }), 180);
     for (let i = 0; i < 26; i++) { const d = new THREE.Vector3(Math.random() - 0.5, 0.3 + Math.random() * 0.7, Math.random() - 0.5).normalize(); this.fx.debris.spawn(p, d.multiplyScalar(14 + Math.random() * 34), 0.35 + Math.random() * 1.2, 8 + Math.random() * 10, Math.random() < 0.55); }
     if (!water) { this.terrain.addCrater(p.x, p.z, 11); this.fx.addFire(p.clone().add(new THREE.Vector3(0, 1, 0)), 2.6, 240); }
     else this.ocean.addSplash(p.x, p.z, 14);
@@ -883,6 +883,14 @@ export class Game {
     if (this.frameN % 60 === 0) this.applyNight();
     // sonic boom when crossing Mach 1 (heard from chase/external cams)
     const sup = ac.mach > 1.0; if (sup !== this.wasSup) { if (sup && this.rig.mode !== 'cockpit') { this.audio.sonicBoom(0.05); this.rig.shake = Math.max(this.rig.shake, 0.8); } this.wasSup = sup; }
+    // afterburner light-off: a thump and a small kick of the chase camera (not again for a quick off-on)
+    const abLit = P.alive && !this.attract && ac.ab > 0.06;
+    if (abLit && !this.abWasLit && this.time - (this.abOffT ?? -9) > 0.8) {
+      this.audio.abLight(this.rig.mode === 'cockpit');
+      if (this.rig.mode === 'chase') { this.rig.fovKick = 2.5; this.rig.shake = Math.max(this.rig.shake, 0.35); }
+    }
+    if (!abLit && this.abWasLit) this.abOffT = this.time;
+    this.abWasLit = abLit;
   }
 
   warnings() {
@@ -955,7 +963,7 @@ export class Game {
   drawHUD() {
     const P = this.player, ac = P.ac, s = ac.s, cam = this.camera; const mode = this.rig.mode;
     if (this.attract) { this.hud.draw({ hidden: true }, cam); return; }
-    const S = { messages: this.msgs, mode: mode === 'seeker' ? 'seeker' : 'normal', leftInset: this.attract ? 0 : 388 }; // messages stay clear of the coach card
+    const S = { messages: this.msgs, mode: mode === 'seeker' ? 'seeker' : 'normal', leftInset: this.attract ? 0 : (this.cardRight || 404) + 12 }; // messages stay clear of the coach card
     const W = this.wingman;
     if (W && P.alive) {
       const T = this.wingMenu && W.alive ? W.playerTarget() : null;

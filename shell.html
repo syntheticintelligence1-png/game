@@ -67,6 +67,9 @@ input[type=range] { padding: 0; accent-color: var(--amber); height: 28px; backgr
 .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
 .check input { accent-color: var(--amber); width: 16px; height: 16px; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+/* PLAY stays on screen in short windows: the bar sticks to the bottom edge while the options above scroll */
+#menu .actions { position: sticky; bottom: calc(-1 * max(16px, env(safe-area-inset-bottom, 0px))); z-index: 1; padding: 12px 0 16px; margin-block: -12px -16px; background: linear-gradient(to top, rgba(7, 11, 16, 0.97) calc(100% - 12px), rgba(7, 11, 16, 0)); }
+@media (max-height: 820px) { #menu .brand { font-size: clamp(48px, 10.5vh, 112px); } #menu .panel { gap: 14px; } }
 button { font-family: var(--f-display); font-weight: 900; letter-spacing: 0.08em; font-size: 22px; padding: 10px 22px; border: 1px solid var(--rule); background: var(--deck); color: var(--text); cursor: pointer; border-radius: 0; }
 button:hover { border-color: #5b6c7c; }
 button.primary { background: var(--amber); border-color: var(--amber); color: #1a1206; }
@@ -107,7 +110,7 @@ summary { cursor: pointer; padding: 10px 12px; font-family: var(--f-data); font-
 @media (max-width: 520px) { .db-list { grid-template-columns: 1fr; } }
 
 /* in-game coach ("what to press now") + controls card */
-#coach, #keys-card { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); width: min(360px, calc(100vw - 32px)); background: rgba(7, 11, 16, 0.8); border: 1px solid var(--rule); color: var(--text); pointer-events: none; font-family: var(--f-body); }
+#coach, #keys-card { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); box-sizing: border-box; width: var(--card-w, min(388px, calc(100vw - 32px))); background: rgba(7, 11, 16, 0.8); border: 1px solid var(--rule); color: var(--text); pointer-events: none; font-family: var(--f-body); }
 #coach { top: calc(6.4vh + 12px + env(safe-area-inset-top, 0px)); border-left: 3px solid var(--amber); padding: 10px 12px 12px; display: grid; gap: 8px; }
 .c-title { font-family: var(--f-display); font-weight: 700; font-size: 22px; letter-spacing: 0.04em; line-height: 1; color: var(--amber); }
 .c-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
@@ -141,10 +144,11 @@ details.settings { background: transparent; }
 .pad { padding: 4px 12px 14px; }
 @media (max-height: 700px) { .c-tip { display: none; } .c-steps li { font-size: 12px; } }
 
-/* radio subtitles: sender, the radio call itself, and what it means */
-#radio { position: fixed; z-index: 2; left: calc(max(16px, env(safe-area-inset-left, 0px)) + min(360px, calc(100vw - 32px)) + 16px); right: 250px;
-  bottom: calc(7.3vh + 10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 6px; pointer-events: none; }
-.rc { width: min(640px, 100%); background: rgba(7, 11, 16, 0.82); border: 1px solid var(--rule); border-left: 3px solid var(--rc, var(--datum)); padding: 7px 12px 8px 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; row-gap: 3px; transition: opacity 0.2s linear; }
+/* radio subtitles: sender, the radio call itself, and what it means. A column on the right, newest on top, kept
+   below the weapon list and beside the HUD (the radio view sets top and width from the HUD layout). */
+#radio { position: fixed; z-index: 2; right: max(16px, env(safe-area-inset-right, 0px)); top: calc(6.4vh + 12px + env(safe-area-inset-top, 0px));
+  width: min(460px, calc(100vw - 32px)); display: flex; flex-direction: column-reverse; justify-content: flex-end; gap: 6px; pointer-events: none; }
+.rc { width: 100%; box-sizing: border-box; background: rgba(7, 11, 16, 0.82); border: 1px solid var(--rule); border-left: 3px solid var(--rc, var(--datum)); padding: 7px 12px 8px 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; row-gap: 3px; transition: opacity 0.2s linear; }
 .rc p { margin: 0; min-width: 0; }
 .rc-from { grid-row: span 2; font-family: var(--f-data); font-size: 11px; line-height: 1.75; letter-spacing: 0.12em; color: var(--rc, var(--datum)); white-space: nowrap; }
 .rc.live .rc-from::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; vertical-align: 1px; }
@@ -155,7 +159,6 @@ details.settings { background: transparent; }
 .rc-pilot { --rc: #9fd3ff; }
 .rc-wing { --rc: #9fffc8; }
 .rc-enemy { --rc: var(--alarm); }
-@media (max-width: 1100px) { #radio { left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); bottom: auto; top: calc(6.4vh + 12px + env(safe-area-inset-top, 0px)); align-items: flex-end; } .rc { width: min(460px, 100%); } }
 
 /* mission briefing: kneeboard card with the tactical map */
 #briefing { align-items: flex-start; justify-content: center; background: rgba(5, 8, 12, 0.86); }
@@ -187,12 +190,14 @@ details.settings { background: transparent; }
 .bf-threats td.r { font-family: var(--f-data); color: #ff8576; white-space: nowrap; }
 .bf-tips { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 12px; line-height: 1.5; }
 .bf-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; border-top: 1px solid var(--rule); padding-top: 12px; }
+/* START MISSION stays on screen in short windows: the footer sticks to the bottom edge while the briefing scrolls */
+.bf-foot { position: sticky; bottom: calc(-1 * max(16px, env(safe-area-inset-bottom, 0px))); z-index: 1; background: var(--deck); margin: 0 -20px -16px; padding: 12px 20px 16px; box-shadow: 0 -14px 16px -12px rgba(0, 0, 0, 0.6); }
 .bf-facts { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; min-width: 0; flex: 1 1 520px; }
 .bf-facts div { display: grid; gap: 2px; min-width: 0; }
 .bf-facts dt { font-family: var(--f-data); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
 .bf-facts dd { margin: 0; font-family: var(--f-data); font-size: 12px; color: var(--text); }
 .bf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-@media (max-width: 860px) { .bf-body { grid-template-columns: minmax(0, 1fr); } .bf-card { padding: 14px; } }
+@media (max-width: 860px) { .bf-body { grid-template-columns: minmax(0, 1fr); } .bf-card { padding: 14px; } .bf-foot { margin: 0 -14px -14px; padding: 12px 14px 14px; } }
 
 @media (max-width: 640px) {
   #menu { background: rgba(7, 11, 16, 0.86); }

@@ -11,7 +11,7 @@ import { AfterburnerFlame } from '../fx/fx.js';
 import { attachLights, FLANKER_LIGHTS } from '../fx/navlights.js';
 
 const D2R = Math.PI / 180;
-const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion();
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion();
 
 function rnd(a, b) { return a + Math.random() * (b - a); }
 
@@ -29,7 +29,9 @@ export class AIJet extends Entity {
     this.vel.set(Math.sin(h), 0, -Math.cos(h)).multiplyScalar(o.speed || 230);
     this.quat.setFromEuler(new THREE.Euler(0, -h, 0));
     this.up = new THREE.Vector3(0, 1, 0);
-    this.mass = 21000; this.S = 62; this.throttle = 0.7; this.ab = 0; this.maxG = 8.5;
+    // lift and G about a match for the player's jet (corner speed near 350 kt); the jet rolls at up to rollRate before
+    // its turn comes on, so its wings show where it is about to go
+    this.mass = 21000; this.S = 62; this.clMax = 1.5; this.throttle = 0.7; this.ab = 0; this.maxG = 8; this.rollRate = 200 * D2R;
     this.state = 'patrol'; this.cap = o.cap ? o.cap.clone() : this.pos.clone(); this.capAlt = o.capAlt || 6000;
     this.radar = new Radar(this, { type: 'air', label: o.label === 'F18' ? 'F18' : '27', range: 75000, azHalf: 60 * D2R, isAir: true, scanPeriod: 3, lethal: 2, emitterOffset: new THREE.Vector3(0, 0, -10) });
     game.world.radars.push(this.radar);
@@ -66,29 +68,43 @@ export class AIJet extends Entity {
     const g = this.game; const V = Math.max(this.vel.length(), 60);
     const vhat = _v.copy(this.vel).multiplyScalar(1 / V);
     const rho = rhoAt(this.pos.y); const q = 0.5 * rho * V * V;
-    const gAvail = q * this.S * 1.75 / (this.mass * G0);
+    const gAvail = q * this.S * this.clMax / (this.mass * G0);
     const gLim = Math.min(this.maxG, gAvail);
     // terrain avoidance
     const look = _v2.copy(this.pos).addScaledVector(vhat, V * 4);
     const gh = Math.max(g.terrain.heightAt(look.x, look.z), g.terrain.heightAt(this.pos.x, this.pos.z), 0);
     const want = _v3.copy(dir).normalize();
-    if (this.pos.y < gh + 220 || look.y < gh + 150) { want.y = Math.max(want.y, 0.35 + (gh + 220 - this.pos.y) / 400); want.normalize(); }
+    const lowAlt = this.pos.y < gh + 220 || look.y < gh + 150;
+    if (lowAlt) { want.y = Math.max(want.y, 0.35 + (gh + 220 - this.pos.y) / 400); want.normalize(); }
     const cosA = THREE.MathUtils.clamp(vhat.dot(want), -1, 1); const ang = Math.acos(cosA);
-    let turnRate = 0;
     const axis = new THREE.Vector3().copy(vhat).cross(want);
     if (axis.lengthSq() < 1e-8) axis.copy(this.up).cross(vhat);
     axis.normalize();
-    if (ang > 1e-4) {
-      const omegaMax = gLim * G0 / V;
-      turnRate = Math.min(omegaMax, ang * 2.5);
-      const newDir = vhat.clone().applyAxisAngle(axis, Math.min(ang, turnRate * dt));
-      this.vel.copy(newDir).multiplyScalar(V);
+    const turnRate = ang > 1e-4 ? Math.min(gLim * G0 / V, ang * 2.5) : 0;
+    // the lift it wants (turn plus holding itself up against gravity), within the G it can pull
+    const lift = axis.clone().cross(vhat).multiplyScalar(turnRate * V).add(_v4.set(0, G0, 0));
+    lift.addScaledVector(vhat, -lift.dot(vhat));
+    let nWant = lift.length() / G0;
+    if (nWant > gLim) { lift.multiplyScalar(gLim / nWant); nWant = gLim; }
+    // roll: the lift vector (the jet's up) swings round the flight path toward the one wanted at the roll rate; the
+    // pull comes on as the wings get there (none while they still point more than 90 degrees off)
+    const up = this.up.addScaledVector(vhat, -this.up.dot(vhat));
+    if (up.lengthSq() < 1e-6) up.set(0, 1, 0).addScaledVector(vhat, -vhat.y);
+    up.normalize();
+    if (nWant > 1e-3) {
+      const dWant = lift.clone().multiplyScalar(1 / (nWant * G0));
+      const off = Math.acos(THREE.MathUtils.clamp(up.dot(dWant), -1, 1));
+      if (off > 1e-4) {
+        const rAxis = up.clone().cross(dWant); if (rAxis.lengthSq() < 1e-10) rAxis.copy(vhat);
+        const pMax = this.rollRate * Math.sqrt(THREE.MathUtils.clamp(q / 14000, 0.1, 1)) * (lowAlt ? 1.5 : 1);
+        up.applyAxisAngle(rAxis.normalize(), Math.min(off, pMax * dt)).normalize();
+      }
+      nWant *= Math.max(0, up.dot(dWant));
     }
-    // lift vector (turn accel + gravity compensation) defines the up axis (coordinated flight)
-    const aTurn = axis.clone().cross(vhat).multiplyScalar(turnRate * V);
-    const lift = aTurn.add(new THREE.Vector3(0, G0, 0)); lift.addScaledVector(vhat, -lift.dot(vhat));
-    this.gLoad = lift.length() / G0;
-    if (lift.lengthSq() > 1e-4) this.up.lerp(lift.normalize(), Math.min(1, dt * 4)).normalize();
+    // the flight path bends under the lift it actually has plus gravity
+    const aPerp = up.clone().multiplyScalar(nWant * G0).add(_v4.set(0, -G0, 0).addScaledVector(vhat, G0 * vhat.y));
+    this.vel.addScaledVector(aPerp, dt).setLength(V);
+    this.gLoad = nWant;
     // energy: thrust - drag - gravity along path
     const CL = this.gLoad * this.mass * G0 / Math.max(q * this.S, 1);
     const M = V / soundAt(this.pos.y);
@@ -283,6 +299,7 @@ export class AIJet extends Entity {
   onDestroyedVisual() {
     this.falling = true; this.fallT = 0; this.spin.set(rnd(-1, 1), rnd(-2, 2), rnd(-3, 3));
     this.fire_ = this.game.fx.addFire(this.pos, 0.8, 30, { follow: () => this.pos });
+    if (!this.smokeTrail) this.smokeTrail = this.game.fx.trails.create({ kind: 'smoke', width: 2.5, grow: 2.0, maxAge: 12, opacity: 0.85, color: [0.09, 0.09, 0.09], minStep: 5 });
     this.flames.forEach(f => f.set(0, 0));
     if (this.audio) this.audio.stop();
     this.radar.on = false;
@@ -297,7 +314,7 @@ export class AIJet extends Entity {
     if (this.smokeTrail) this.smokeTrail.add(this.pos);
     const th = g.terrain.heightAt(this.pos.x, this.pos.z);
     if (this.pos.y < Math.max(th, 0)) {
-      this.falling = false; g.fx.explosion(this.pos.clone(), 6, { surface: th > 0 ? 'ground' : 'water', water: th <= 0 });
+      this.falling = false; g.fx.explosion(this.pos.clone(), 6, { surface: th > 0 ? 'ground' : 'water', water: th <= 0, fuel: true });
       if (this.fire_) this.fire_.life = 0; this.root.visible = false; if (this.smokeTrail) this.smokeTrail.stop();
       if (th > 0) g.fx.addFire(this.pos.clone(), 0.9, 120);
     }

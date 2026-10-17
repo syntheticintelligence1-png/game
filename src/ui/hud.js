@@ -4,6 +4,7 @@ import * as THREE from 'three';
 
 const D2R = Math.PI / 180, R2D = 180 / Math.PI;
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3();
+const HUD_HALF_W = 262; // half-width of the flight HUD (speed box to altitude box) in HUD units
 
 export class HUD {
   constructor(canvas) {
@@ -14,7 +15,10 @@ export class HUD {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.c.width = Math.floor(innerWidth * dpr); this.c.height = Math.floor(innerHeight * dpr);
     this.c.style.width = innerWidth + 'px'; this.c.style.height = innerHeight + 'px';
-    this.dpr = dpr; this.W = this.c.width; this.H = this.c.height; this.s = this.H / 900;
+    // scale with the window height, but in narrow windows with the width, so the HUD keeps clear of the cards at the sides
+    this.dpr = dpr; this.W = this.c.width; this.H = this.c.height; this.s = Math.min(this.H / 900, this.W / 1500);
+    this.cssHalfW = HUD_HALF_W * this.s / dpr; // the flight HUD spans the screen centre ± this (CSS px)
+    this.topRightCss = 60; // bottom of the weapon list / wingman text at the top right (CSS px), set while drawing
   }
   // world direction -> screen px (null when behind camera)
   proj(cam, dir) {
@@ -47,10 +51,11 @@ export class HUD {
       c.save(); c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(this.W / 2 - 170 * s, 14 * s, 340 * s, 24 * s); c.fillStyle = '#9fffb5';
       this.text('AUTOPILOT FLYING YOUR JET · M = TAKE BACK CONTROL', this.W / 2, 26 * s, 'center', 12); c.restore();
       if (S.threat) { this.drawThreat(S.threat); c.save(); c.fillStyle = '#ffe14d'; this.text('MISSILE COMING AT YOUR JET — PRESS M NOW', this.W / 2, this.H * 0.6, 'center', 16); c.restore(); }
-      if (S.wing && S.wing.menu) this.drawWing(S.wing, this.W - 18 * s, 60 * s);
+      const wy = S.wing && S.wing.menu ? this.drawWing(S.wing, this.W - 18 * s, 60 * s) : 80 * s;
+      this.topRightCss = wy / this.dpr;
       this.drawMessages(S); return;
     }
-    if (S.mode === 'defender') { this.drawDefender(S, cam); this.drawMessages(S); return; }
+    if (S.mode === 'defender') { this.topRightCss = 80 * this.s / this.dpr; this.drawDefender(S, cam); this.drawMessages(S); return; }
     if (S.ac && S.showHud) {
       c.save();
       c.strokeStyle = this.green; c.fillStyle = this.green;
@@ -326,16 +331,18 @@ export class HUD {
     const c = this.ctx, s = this.s, W = this.W, H = this.H;
     // mini RWR (chase view / always as overlay bottom right)
     if (S.rwr && S.showRwrOverlay) this.drawRWR(c, W - 120 * s, H - 130 * s, 95 * s, S.rwr, s);
-    // engine/fuel/G strip
-    c.save(); c.fillStyle = 'rgba(0,0,0,0.35)'; c.fillRect(14 * s, H - 64 * s, 470 * s, 50 * s); c.restore();
-    c.fillStyle = '#cfe9ff';
-    this.text(`${S.camLabel || ''}`, 24 * s, H - 50 * s, 'left', 12);
-    if (S.detect) { c.save(); c.fillStyle = S.detect === 'LOCKED' ? '#ff5b4b' : S.detect === 'SCANNED' ? '#f3a83a' : '#4fe08a'; this.text(`RADAR: ${S.detect === 'HIDDEN' ? 'NOT SEEN' : S.detect === 'SCANNED' ? 'SCANNING YOU' : 'LOCKED ON YOU'}`, 200 * s, H - 50 * s, 'left', 12); c.restore(); c.fillStyle = '#cfe9ff'; }
-    this.text(`SPD ${Math.round(S.ias)} KT  ALT ${Math.round(S.alt)} FT  HDG ${String(Math.round(S.heading) % 360).padStart(3, '0')}${S.throttle != null ? `  THR ${Math.round(S.throttle * 100)}%${S.throttle > 0.81 ? ' AB' : ''}` : ''}`, 24 * s, H - 30 * s, 'left', 12);
+    // engine/fuel/G strip (only while there is a jet to describe)
+    if (S.ias != null) {
+      c.save(); c.fillStyle = 'rgba(0,0,0,0.35)'; c.fillRect(14 * s, H - 64 * s, 470 * s, 50 * s); c.restore();
+      c.fillStyle = '#cfe9ff';
+      this.text(`${S.camLabel || ''}`, 24 * s, H - 50 * s, 'left', 12);
+      if (S.detect) { c.save(); c.fillStyle = S.detect === 'LOCKED' ? '#ff5b4b' : S.detect === 'SCANNED' ? '#f3a83a' : '#4fe08a'; this.text(`RADAR: ${S.detect === 'HIDDEN' ? 'NOT SEEN' : S.detect === 'SCANNED' ? 'SCANNING YOU' : 'LOCKED ON YOU'}`, 200 * s, H - 50 * s, 'left', 12); c.restore(); c.fillStyle = '#cfe9ff'; }
+      this.text(`SPD ${Math.round(S.ias)} KT  ALT ${Math.round(S.alt)} FT  HDG ${String(Math.round(S.heading) % 360).padStart(3, '0')}${S.throttle != null ? `  THR ${Math.round(S.throttle * 100)}%${S.throttle > 0.81 ? ' AB' : ''}` : ''}`, 24 * s, H - 30 * s, 'left', 12);
+    }
     // weapon inventory, then the wingman under it
     let invY = 24 * s;
     if (S.inventory) { c.textAlign = 'right'; for (const it of S.inventory) { c.fillStyle = it.sel ? '#ffe680' : '#cfe9ff'; this.text(`${it.sel ? '▶ ' : ''}${it.key} ${it.name} ×${it.n}`, W - 18 * s, invY, 'right', 12); invY += 17 * s; } }
-    if (S.wing) this.drawWing(S.wing, W - 18 * s, invY + 10 * s);
+    this.topRightCss = (S.wing ? this.drawWing(S.wing, W - 18 * s, invY + 10 * s) : invY) / this.dpr;
     // score
     if (S.score != null) { c.fillStyle = '#cfe9ff'; this.text(`KILLS ${S.score}`, 18 * s, 24 * s, 'left', 13); if (S.objective) this.text(S.objective, 18 * s, 44 * s, 'left', 12); }
     // TGP picture-in-picture frame
@@ -344,16 +351,17 @@ export class HUD {
     if (S.flashMsg) { c.fillStyle = '#ffffff'; this.text(S.flashMsg, W / 2, H * 0.35, 'center', 26); }
   }
 
-  // wingman: what he's doing (right-aligned at x), and the O order menu below it
+  // wingman: what he's doing (right-aligned at x), and the O order menu below it; returns the bottom y
   drawWing(G, x, y) {
     const c = this.ctx, s = this.s;
     c.save(); c.shadowColor = 'rgba(0,0,0,0.85)'; c.shadowBlur = 3 * s;
     c.fillStyle = G.alive ? '#9fffc8' : '#ff9080';
     this.text(`WINGMAN: ${G.status}`, x, y, 'right', 12);
-    if (G.alive && !G.menu) { c.fillStyle = '#8fb3c8'; this.text('O = GIVE HIM ORDERS', x, y + 16 * s, 'right', 11); }
+    let bottom = y + 8 * s;
+    if (G.alive && !G.menu) { c.fillStyle = '#8fb3c8'; this.text('O = GIVE HIM ORDERS', x, y + 16 * s, 'right', 11); bottom = y + 23 * s; }
     if (G.menu) {
       const w = 370 * s, x0 = x - w, h = ((G.menu.length + 3) * 19 + 14) * s;
-      let yy = y + 14 * s;
+      let yy = y + 14 * s; bottom = yy + h;
       c.shadowBlur = 0; c.fillStyle = 'rgba(7,11,16,0.84)'; c.fillRect(x0, yy, w, h);
       c.strokeStyle = '#9fffc8'; c.lineWidth = 1.2 * s; c.strokeRect(x0, yy, w, h);
       yy += 17 * s;
@@ -368,6 +376,7 @@ export class HUD {
       this.text('O = CLOSE', x0 + 12 * s, yy, 'left', 11);
     }
     c.restore();
+    return bottom;
   }
 
   drawMessages(S) {

@@ -1,19 +1,30 @@
 // Radio subtitles: who is talking, what they said (real radio brevity) and what it means in plain English.
-// Reads game.comms (the radio queue) once per frame; only touches the DOM when a call starts or ends.
+// Reads game.comms (the radio queue) once per frame; only touches the DOM when a call starts or ends, or when the
+// column has to move (the HUD's weapon list and wingman menu above it change height).
+const RADIO_MIN_W = 300, RADIO_MAX_W = 460;
+
 export class CommsView {
   constructor(game) {
-    this.g = game; this.el = document.getElementById('radio'); this.ver = -1; this.nodes = new Map();
+    this.g = game; this.el = document.getElementById('radio'); this.ver = -1; this.nodes = new Map(); this.top = -1; this.w = -1;
   }
   update() {
     const g = this.g, R = g.comms, el = this.el; if (!el || !R) return;
     const show = !g.attract && R.active.length > 0;
     if (el.hidden === show) el.hidden = !show;
+    if (show && g.hud) this.place(g.hud);
     if (R.ver !== this.ver) { this.ver = R.ver; this.render(R.active); }
     for (const it of R.active) {
       const n = this.nodes.get(it.id); if (!n) continue;
       n.style.opacity = Math.max(0, Math.min(1, (it.dur - it.age) / 0.7)).toFixed(2);
       const live = it.age < it.talk; if (n._live !== live) { n._live = live; n.classList.toggle('live', live); }
     }
+  }
+  // under the weapon list / wingman text at the top right, and no wider than the gap beside the HUD
+  place(hud) {
+    const top = Math.round(Math.max(hud.topRightCss + 12, innerHeight * 0.064 + 12));
+    const w = Math.round(Math.min(innerWidth - 32, Math.max(RADIO_MIN_W, Math.min(RADIO_MAX_W, innerWidth / 2 - hud.cssHalfW - 32))));
+    if (top !== this.top) { this.top = top; this.el.style.top = `${top}px`; }
+    if (w !== this.w) { this.w = w; this.el.style.width = `${w}px`; }
   }
   render(list) {
     const keep = new Set(list.map(i => i.id));

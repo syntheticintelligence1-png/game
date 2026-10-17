@@ -126,7 +126,7 @@ export class Briefing {
       <section class="bf-sec"><h3>Threats</h3>${threats}</section>
       <section class="bf-sec"><h3>Staying alive</h3><ul class="bf-tips">${B.tips.map(t => `<li>${kbd(esc(t))}</li>`).join('')}</ul></section>
       ${scenario === 'approach' ? '' : `<section class="bf-sec"><h3>Your wingman</h3><p>${kbd(esc(scenario === 'air' ? WING_AIR : WING_STRIKE))}</p></section>`}
-      <section class="bf-sec"><h3>Radio</h3><p>You are <b>SPEAR 1-1</b>${scenario === 'approach' ? '' : ', your wingman is <b>SPEAR 1-2</b>'}. <b>MAGIC</b> is the radar plane that watches the sky for you, <b>MOTHER</b> is the carrier, <b>PADDLES</b> the landing officer. Every call shows up at the bottom of the screen with what it means in plain English.</p></section>`;
+      <section class="bf-sec"><h3>Radio</h3><p>You are <b>SPEAR 1-1</b>${scenario === 'approach' ? '' : ', your wingman is <b>SPEAR 1-2</b>'}. <b>MAGIC</b> is the radar plane that watches the sky for you, <b>MOTHER</b> is the carrier, <b>PADDLES</b> the landing officer. Every call shows up on the right of the screen with what it means in plain English.</p></section>`;
     // the facts strip: loadout, time, weather
     const inv = g.player.inventory().map(it => (it.key === 'C' ? `${it.name} gun, ${it.n} rounds` : `${it.n}× ${it.name}`));
     const hr = g.sky.hours ?? 9.5, hh = Math.floor(hr), mm = Math.round((hr - hh) * 60);

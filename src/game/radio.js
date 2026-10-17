@@ -128,7 +128,7 @@ export class Radio {
     else return;
     const many = this.last.launch != null && g.time - this.last.launch < 14;
     this.call('awacs', `${CS}, ${what}, your ${G.clock} o'clock${many ? ', multiple missiles' : ''}!`,
-      `${plainWhat} from ${G.dir} (${G.clock} o'clock). Follow the BREAK cue and press X when it says NOW.`,
+      `${plainWhat} from ${G.dir.replace(/^to /, '')} (${G.clock} o'clock). Follow the BREAK cue and press X when it says NOW.`,
       { key: 'launch', every: 6, pri: 6, urgent: true, ttl: 4, say: `${SAY_CS}, ${sayWhat}, ${NUMW[G.clock]} o'clock!` });
   }
 

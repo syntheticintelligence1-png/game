@@ -6,7 +6,10 @@ import * as THREE from 'three';
 import { GU, GLSL_COMMON, GLSL_CLOUDS } from '../render/glsl.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
-export const PT = { SMOKE: 0, FIRE: 1, FLASH: 2, SPARK: 3, DUST: 4, SPRAY: 5, STEAM: 6, FLARE: 7, MUZZLE: 8, EMBER: 9 };
+// fireball look: counts per unit of blast size, heat of the glowing body and how fast it cools, additive flame tint
+export const BLAST = { ballN: 3, ballHeat: 2.6, ballCool: 1.6, fireN: 2, fireCol: [0.25, 0.13, 0.06] };
+const VORTEX_MAX_ANGLE = 0.035; // max ribbon half-width per metre of distance from the camera (radians, roughly)
+export const PT = { SMOKE: 0, FIRE: 1, FLASH: 2, SPARK: 3, DUST: 4, SPRAY: 5, STEAM: 6, FLARE: 7, MUZZLE: 8, EMBER: 9, BALL: 10 };
 
 const PARTICLE_VS = /* glsl */`
 ${GLSL_COMMON}
@@ -69,8 +72,11 @@ void main() {
   else {
     vec3 alb = vColor.rgb;
     col = alb * (uSunColor * ndl * ndl * 0.3 + uSkyAmb * 0.9 + uGroundAmb * 0.4);
-    // self-glow at the base of fresh fire smoke
-    col += vec3(1.0, 0.45, 0.15) * max(vColor.a - 0.6, 0.0) * 6.0 * (1.0 - r);
+    // self-glow of fresh fire smoke; heat above 1 is a fireball's body, brighter but kept orange (the tone curve
+    // turns anything much brighter white)
+    float h = vColor.a;
+    float gI = max(min(h, 1.0) - 0.6, 0.0) * 6.0 + max(h - 1.0, 0.0) * 2.2;
+    col += mix(vec3(1.0, 0.45, 0.15), vec3(1.0, 0.52, 0.2), smoothstep(1.3, 2.6, h)) * gI * (1.0 - r);
     col = col * vFogT + vHaze * (1.0 - vFogT);
   }
   gl_FragColor = vec4(col * a, a);
@@ -103,6 +109,7 @@ class ParticleSystem {
     this.age = new Float32Array(max); this.life = new Float32Array(max); this.size = new Float32Array(max); this.grow = new Float32Array(max);
     this.rot = new Float32Array(max); this.spin = new Float32Array(max); this.type = new Uint8Array(max); this.alpha = new Float32Array(max);
     this.col = new Float32Array(max * 3); this.heat = new Float32Array(max); this.drag = new Float32Array(max); this.buoy = new Float32Array(max); this.seed = new Float32Array(max);
+    this.cool = new Float32Array(max); // extra heat decay per second (explosion smoke stops glowing within a second)
     this.order = new Uint32Array(max); this.keys = new Float32Array(max);
     const g = new THREE.InstancedBufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0], 3));
@@ -135,6 +142,7 @@ class ParticleSystem {
     this.type[i] = type; this.alpha[i] = o.alpha != null ? o.alpha : 1;
     const c = o.color || [1, 1, 1]; this.col[i * 3] = c[0]; this.col[i * 3 + 1] = c[1]; this.col[i * 3 + 2] = c[2];
     this.heat[i] = o.heat != null ? o.heat : 0.3; this.drag[i] = o.drag != null ? o.drag : 0.5; this.buoy[i] = o.buoy || 0; this.seed[i] = Math.random();
+    this.cool[i] = o.cool || 0;
     return i;
   }
   kill(i) {
@@ -142,6 +150,7 @@ class ParticleSystem {
     for (let k = 0; k < 3; k++) { this.pos[i * 3 + k] = this.pos[j * 3 + k]; this.vel[i * 3 + k] = this.vel[j * 3 + k]; this.col[i * 3 + k] = this.col[j * 3 + k]; }
     this.age[i] = this.age[j]; this.life[i] = this.life[j]; this.size[i] = this.size[j]; this.grow[i] = this.grow[j]; this.rot[i] = this.rot[j]; this.spin[i] = this.spin[j];
     this.type[i] = this.type[j]; this.alpha[i] = this.alpha[j]; this.heat[i] = this.heat[j]; this.drag[i] = this.drag[j]; this.buoy[i] = this.buoy[j]; this.seed[i] = this.seed[j];
+    this.cool[i] = this.cool[j];
   }
   update(dt, camera, wind) {
     const P = this.pos, V = this.vel;
@@ -172,7 +181,8 @@ class ParticleSystem {
       let a = this.alpha[i], r = this.col[i * 3], g = this.col[i * 3 + 1], b = this.col[i * 3 + 2], heat = this.heat[i];
       let rot = this.rot[i];
       switch (t) {
-        case PT.SMOKE: a *= Math.min(1, f * 8) * (1 - f) ** 1.3; heat *= 1 - f; break;
+        case PT.SMOKE: a *= Math.min(1, f * 8) * (1 - f) ** 1.3; heat *= (1 - f) * (this.cool[i] ? Math.exp(-this.age[i] * this.cool[i]) : 1); break;
+        case PT.BALL: a *= Math.min(1, f * 40) * (1 - f) ** 1.3; heat *= (1 - f) * Math.exp(-this.age[i] * this.cool[i]); break;
         case PT.DUST: case PT.SPRAY: case PT.STEAM: a *= Math.min(1, f * 6) * (1 - f) ** 1.6; break;
         case PT.FIRE: {
           // temperature curve: white-yellow core -> orange -> deep red -> out
@@ -211,9 +221,11 @@ class Trail {
   }
   add(p, w = 1) {
     if (!this.emitting) { this.emitting = true; this.pts.push(null); }
-    const last = this.pts.length ? this.pts[this.pts.length - 1] : null;
+    const n = this.pts.length, last = n ? this.pts[n - 1] : null, prev = n > 1 ? this.pts[n - 2] : null;
     const t = this.sys.time;
-    if (last && last.p.distanceToSquared(p) < this.minStep * this.minStep) { last.p.copy(p); last.t = t; return; }
+    // the newest point rides along with the emitter until it is minStep past the point before it, then stays put
+    // (measuring from the moving point itself meant a trail only grew when the emitter covered minStep in one frame)
+    if (last && prev && prev.p.distanceToSquared(p) < this.minStep * this.minStep) { last.p.copy(p); last.t = t; return; }
     this.pts.push({ p: p.clone(), t, w });
     if (this.pts.length > 220) this.pts.shift();
   }
@@ -247,6 +259,8 @@ void main() {
   float sceneW = d < 0.999999 ? exp2(d * uLogFar) - 1.0 : 1e9;
   float vz = -(viewMatrix * vec4(vWP, 1.0)).z;
   a *= clamp((sceneW - vz) / 3.0, 0.0, 1.0);
+  // thin out where the ribbon passes right by the camera instead of smearing a wide band across the screen
+  a *= smoothstep(2.0, 16.0, vz);
   if (a < 0.003) discard;
   vec3 col = uThermal > 0.5 ? vec3(0.15 + 0.3 * (1.0 - vData.x)) : vCol * (uSunColor * 0.12 + uSkyAmb * 1.0);
   if (uThermal < 0.5) col = col * vFogT + vHaze * (1.0 - vFogT);
@@ -294,7 +308,9 @@ class TrailSystem {
         _v2.copy(p.p).sub(cam);
         _v3.copy(_v).cross(_v2).normalize();
         const age = (this.time - p.t) / tr.maxAge;
-        const w = (tr.w0 + tr.grow * (this.time - p.t) * 2.0) * p.w * 0.5;
+        let w = (tr.w0 + tr.grow * (this.time - p.t) * 2.0) * p.w * 0.5;
+        // vapor ribbons stream right past the chase camera: keep them from looking wider than ~4 degrees
+        if (tr.kind === 'vortex') w = Math.min(w, _v2.length() * VORTEX_MAX_ANGLE);
         if (pv) along += p.p.distanceTo(pv.p);
         for (let s = -1; s <= 1; s += 2) {
           P[nv * 3] = p.p.x + _v3.x * w * s; P[nv * 3 + 1] = p.p.y + _v3.y * w * s; P[nv * 3 + 2] = p.p.z + _v3.z * w * s;
@@ -485,14 +501,14 @@ export class FX {
       vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP; void main(){ vP = position; vN = normalize(normalMatrix*normal); vec4 mv = modelViewMatrix*vec4(position,1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
       fragmentShader: `uniform float uA; uniform sampler2D uNoiseTex; uniform vec3 uSkyAmb; uniform vec3 uSunColor; uniform float uThermal; varying vec3 vN; varying vec3 vV; varying vec3 vP;
         void main(){ float rim = 1.0 - abs(dot(vN, vV)); float n = texture(uNoiseTex, vP.xz * 0.6 + vP.y * 0.3).r;
-          float a = uA * (0.25 + 0.75 * pow(rim, 1.5)) * smoothstep(0.25, 0.7, n + 0.2) * smoothstep(-0.05, 0.25, vP.y);
+          float a = uA * (0.25 + 0.75 * pow(rim, 1.5)) * (1.0 - smoothstep(0.6, 0.98, rim)) * smoothstep(0.25, 0.7, n + 0.2) * smoothstep(-0.05, 0.25, vP.y);
           vec3 c = uThermal > 0.5 ? vec3(0.1) : vec3(0.9) * (uSkyAmb * 1.2 + uSunColor * 0.08);
           gl_FragColor = vec4(c * a, a); }`,
       transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide,
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     });
     this.wilsonGeo = new THREE.SphereGeometry(1, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    this.shake = 0;
+    this.shake = 0; this.blast = BLAST;
   }
 
   setDepth(depthTex, w, h) { this.depthU.uDepth.value = depthTex; this.depthU.uRes.value.set(w, h); }
@@ -534,36 +550,50 @@ export class FX {
   // ---------------- the 5-stage detonation ----------------
   explosion(p, size, o = {}) {
     const g = this.game; const A = this.ps.add, S = this.ps.alpha;
-    const water = !!o.water; const surface = o.surface || 'air';
-    // Stage 1: thermal flash (sub-frame HDR light spike + blinding white core)
+    const water = !!o.water; const surface = o.surface || 'air'; const fuel = !!o.fuel;
+    // Stage 1: thermal flash (sub-frame HDR light spike + a brief white-hot core)
     this.lights.add(p, [1, 0.85, 0.65], 5000 * size * size, 0.2 + size * 0.03, { decay: 3 });
     this.lights.add(p, [1, 0.45, 0.15], 1500 * size * size, 1.2 + size * 0.25, { decay: 1.5 });
-    A.spawn(PT.FLASH, p.x, p.y, p.z, 0, 0, 0, 4 + size * 5, 0.12 + size * 0.015, { color: [60, 52, 45], must: true });
-    A.spawn(PT.FLASH, p.x, p.y, p.z, 0, 0, 0, 2 + size * 2.5, 0.25 + size * 0.02, { color: [30, 18, 8] });
-    // Stage 2: refractive shockwave + Wilson condensation cloud
-    const shockR = 25 + size * 22;
+    A.spawn(PT.FLASH, p.x, p.y, p.z, 0, 0, 0, 3 + size * 3.5, 0.08 + size * 0.01, { color: [60, 52, 45], must: true });
+    A.spawn(PT.FLASH, p.x, p.y, p.z, 0, 0, 0, 2 + size * 2.5, 0.25 + size * 0.02, { color: [16, 8, 2.5] });
+    // Stage 2: refractive shockwave + a short condensation puff around big blasts near the surface
+    const shockR = 15 + size * 14;
     const sm = new THREE.Mesh(this.shockGeo, this.shockMat.clone()); sm.position.copy(p); sm.scale.setScalar(1); sm.frustumCulled = false;
     this.pipe.distScene.add(sm);
     this.shocks.push({ mesh: sm, age: 0, life: 0.45 + size * 0.06, R: shockR, kind: 'shock' });
-    if (size >= 6 && (water || p.y < 120)) {
+    if (size >= 7 && (water || p.y < 120)) {
       const wm = new THREE.Mesh(this.wilsonGeo, this.wilsonMat.clone()); wm.position.copy(p); wm.position.y = Math.max(p.y - 4, water ? 0 : p.y - 4); wm.frustumCulled = false;
-      this.scene.add(wm); this.shocks.push({ mesh: wm, age: 0, life: 1.1, R: shockR * 1.3, kind: 'wilson' });
+      this.scene.add(wm); this.shocks.push({ mesh: wm, age: 0, life: 0.8, R: 14 + size * 4, kind: 'wilson' });
     }
-    // Stage 3: volumetric fireball cooling into a towering smoke column
-    const nf = Math.floor(8 + size * 7);
+    // Stage 3: fireball cooling into a smoke column. The body is glowing smoke (alpha blended, so its front hides
+    // its back) and a few additive flames flicker on top; dozens of additive flames alone summed to a white blob.
+    // Burning fuel (aircraft) gives a bigger fireball and black smoke.
+    // (at sea most of the "smoke" is grey steam and spray)
+    const B = BLAST, up = surface === 'air' ? 0 : 1, more = (fuel ? 1.3 : 1) * (water ? 0.6 : 1);
+    const nb = Math.floor((5 + size * B.ballN) * more);
+    for (let i = 0; i < nb; i++) {
+      const dir = _v.set(Math.random() - 0.5, Math.random() * (0.8 + up * 0.2) - 0.5 + up * 0.4, Math.random() - 0.5).normalize();
+      const sp = (1.5 + Math.random() * 5) * Math.sqrt(size) * 2.0;
+      const dk = water ? 0.3 : fuel ? 0.05 : surface === 'air' ? 0.13 : 0.07;
+      S.spawn(PT.BALL, p.x + dir.x * size * 0.4, p.y + dir.y * size * 0.4, p.z + dir.z * size * 0.4, dir.x * sp, dir.y * sp + size * 0.6, dir.z * sp,
+        (1.4 + Math.random() * 1.8) * Math.pow(size, 0.8), 2.5 + Math.random() * 2 + size * 0.3,
+        { grow: size * 1.5, drag: 2.0, buoy: 4 + size * 0.8, color: [dk, dk * 0.93, dk * 0.88], alpha: 0.95, heat: B.ballHeat + Math.random() * 0.5, cool: B.ballCool * (0.8 + Math.random() * 0.5), must: i < 4 });
+    }
+    const nf = Math.floor((4 + size * B.fireN) * more);
+    const fc = B.fireCol;
     for (let i = 0; i < nf; i++) {
       const dir = _v.set(Math.random() - 0.5, Math.random() * (surface === 'air' ? 1 : 0.8) - (surface === 'air' ? 0.5 : -0.1), Math.random() - 0.5).normalize();
       const sp = (2 + Math.random() * 6) * Math.sqrt(size) * 2.2;
       A.spawn(PT.FIRE, p.x + dir.x * size * 0.6, p.y + dir.y * size * 0.6, p.z + dir.z * size * 0.6, dir.x * sp, dir.y * sp + size * 0.8, dir.z * sp,
-        (1.5 + Math.random() * 2.5) * Math.pow(size, 0.8), 0.5 + Math.random() * 0.6 + size * 0.06, { grow: size * 2.2, drag: 2.0, buoy: 6 + size, color: [1, 1, 1], must: i < 6 });
+        (1.2 + Math.random() * 2.0) * Math.pow(size, 0.8), 0.45 + Math.random() * 0.5 + size * 0.05, { grow: size * 1.8, drag: 2.0, buoy: 6 + size, color: fc, must: i < 6 });
     }
-    const ns = Math.floor(6 + size * 5);
+    const ns = Math.floor((6 + size * 5) * (fuel ? 1.3 : 1));
     for (let i = 0; i < ns; i++) {
       const dir = _v.set(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).normalize();
       const sp = (1 + Math.random() * 4) * Math.sqrt(size) * 1.6;
-      const dark = surface === 'air' ? 0.16 + Math.random() * 0.1 : 0.05 + Math.random() * 0.06;
+      const dark = water ? 0.32 + Math.random() * 0.15 : fuel ? 0.045 + Math.random() * 0.045 : surface === 'air' ? 0.16 + Math.random() * 0.1 : 0.05 + Math.random() * 0.06;
       S.spawn(PT.SMOKE, p.x + dir.x * size, p.y + dir.y * size, p.z + dir.z * size, dir.x * sp, dir.y * sp + 2, dir.z * sp,
-        (2 + Math.random() * 3) * Math.pow(size, 0.85), 6 + Math.random() * 6 + size * 2, { grow: 1.2 + size * 0.9, drag: 0.7, buoy: 2 + size * 0.6, color: [dark, dark * 0.95, dark * 0.9], alpha: 0.9, heat: 0.9 });
+        (2 + Math.random() * 3) * Math.pow(size, 0.85), 6 + Math.random() * 6 + size * 2, { grow: 1.2 + size * 0.9, drag: 0.7, buoy: 2 + size * 0.6, color: [dark, dark * 0.95, dark * 0.9], alpha: 0.9, heat: 0.9, cool: 1.1 });
     }
     // Stage 4: debris, shrapnel and arcing white-hot sparks trailing smoke
     if (surface !== 'water') {
@@ -611,8 +641,8 @@ export class FX {
     for (let i = this.shocks.length - 1; i >= 0; i--) {
       const s = this.shocks[i]; s.age += dt; const f = s.age / s.life;
       if (f >= 1) { s.mesh.parent && s.mesh.parent.remove(s.mesh); this.shocks.splice(i, 1); continue; }
-      if (s.kind === 'shock') { s.mesh.scale.setScalar(Math.max(1, s.R * Math.sqrt(f))); s.mesh.material.uniforms.uStr.value = 0.035 * (1 - f); }
-      else { s.mesh.scale.set(s.R * (0.4 + 0.6 * Math.sqrt(f)), s.R * (0.25 + 0.4 * f), s.R * (0.4 + 0.6 * Math.sqrt(f))); s.mesh.material.uniforms.uA.value = 0.7 * Math.sin(Math.PI * Math.min(1, f * 1.3)) * (1 - f); }
+      if (s.kind === 'shock') { s.mesh.scale.setScalar(Math.max(1, s.R * Math.sqrt(f))); s.mesh.material.uniforms.uStr.value = 0.025 * (1 - f); }
+      else { s.mesh.scale.set(s.R * (0.4 + 0.6 * Math.sqrt(f)), s.R * (0.25 + 0.4 * f), s.R * (0.4 + 0.6 * Math.sqrt(f))); s.mesh.material.uniforms.uA.value = 0.45 * Math.sin(Math.PI * Math.min(1, f * 1.3)) * (1 - f); }
     }
     // emitters: burning wrecks & streamers
     for (let i = this.emitters.length - 1; i >= 0; i--) {
@@ -623,8 +653,27 @@ export class FX {
         this.ps.add.spawn(PT.EMBER, e.pos.x, e.pos.y, e.pos.z, 0, 0, 0, 0.5, 0.15, { color: [15, 14, 12] });
         continue;
       }
-      if (e.follow) e.pos.copy(e.follow());
+      if (e.follow) {
+        const np = e.follow();
+        if (e.age > dt * 1.5) (e.vel || (e.vel = new THREE.Vector3())).copy(np).sub(e.pos).multiplyScalar(1 / Math.max(dt, 1e-3));
+        e.pos.copy(np);
+      }
       e.acc += dt; const k = Math.max(0.15, 1 - e.age / e.life);
+      const spd = e.vel ? e.vel.length() : 0;
+      if (spd > 30 && spd < 1500) {
+        // a wreck burning as it falls: a flame tongue and smoke puffs laid evenly along its path (spawning on a timer
+        // left beads 20 m apart)
+        const step = Math.min(0.05, 3.5 / spd), V = e.vel;
+        while (e.acc > step) {
+          e.acc -= step; const back = e.acc; e.n = (e.n || 0) + 1;
+          const x = e.pos.x - V.x * back, y = e.pos.y - V.y * back, z = e.pos.z - V.z * back, j = 0.8 * e.I;
+          if (!e.smokeOnly) this.ps.add.spawn(PT.FIRE, x + (Math.random() - 0.5) * j, y + (Math.random() - 0.5) * j, z + (Math.random() - 0.5) * j, V.x * 0.3, V.y * 0.3, V.z * 0.3,
+            (1.2 + Math.random() * 1.4) * e.I, 0.22 + Math.random() * 0.2, { grow: 3 * e.I, drag: 2.5, color: [0.55, 0.5, 0.45] });
+          if (e.n % 3 === 0) this.ps.alpha.spawn(PT.SMOKE, x, y, z, V.x * 0.1, 0, V.z * 0.1, (1.5 + Math.random() * 1.5) * e.I, 5 + Math.random() * 4,
+            { grow: 2.5 * e.I, drag: 0.6, buoy: 1.5, color: [0.06, 0.058, 0.055], alpha: 0.55 * k, heat: 0.75, cool: 2 });
+        }
+        continue;
+      }
       const rate = 0.08 / Math.max(e.I, 0.3);
       while (e.acc > rate) {
         e.acc -= rate;

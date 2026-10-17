@@ -92,12 +92,19 @@ async function boot() {
   // mission debrief
   const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
   const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // one tip that matches how the mission was lost
+  const failTip = (rep) => {
+    if (/GROUND/.test(rep.headline)) return 'Tip: when the jet says PULL UP, hold S straight away. Over the hills, keep ALT above 3,000 ft unless you are hiding from radar.';
+    if (/SEA/.test(rep.headline)) return 'Tip: when the jet says PULL UP, hold S straight away. Low over water it is hard to judge height: keep ALT above 500 ft.';
+    if (/SHIP/.test(rep.headline)) return 'Tip: to land, put the gear down (G) and fly to the green circle behind the ship. The landing assist then flies the approach with you.';
+    return rep.kind === 'strike' ? 'Tip: fire anti-radar missiles (5) from 20–30 km before you close in, and tap X/Z when a missile is coming. Ticking Practice in the menu lets you learn the run without being shot down.' : 'Tip: lock with T, fire the radar missile (2) from 15–25 km, then turn hard and drop flares (X) if one comes back at you.';
+  };
   game.mission.onEnd = (rep) => {
     game.paused = true; game.audio.setPaused(true);
     const D = $('debrief'); D.classList.toggle('fail', !rep.success);
     $('db-kicker').textContent = rep.success ? 'MISSION COMPLETE' : 'MISSION FAILED';
     $('db-title').textContent = rep.headline;
-    $('db-grade').textContent = rep.success ? `Grade ${rep.grade}` : rep.kind === 'strike' ? 'Tip: fire anti-radar missiles (5) from 20–30 km before you close in, and tap X/Z when a missile is coming. Ticking Practice in the menu lets you learn the run without being shot down.' : 'Tip: lock with T, fire the radar missile (2) from 15–25 km, then turn hard and drop flares (X) if one comes back at you.';
+    $('db-grade').textContent = rep.success ? `Grade ${rep.grade}` : failTip(rep);
     $('db-time').textContent = fmtTime(rep.time); $('db-kills').textContent = rep.kills; $('db-hp').textContent = `${Math.max(0, Math.round(rep.hp))}%`;
     $('db-list').innerHTML = rep.items.map(i => `<li class="${i.ok ? 'ok' : ''}${i.big ? ' big' : ''}"><i>${i.ok ? '✓' : '✗'}</i><span>${esc(i.text)}</span></li>`).join('');
     $('db-continue').hidden = !rep.success;

@@ -20,16 +20,22 @@ export const JET = {
 };
 const smooth = (e0, e1, x) => { let t = (x - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+// pitch-loop gains, gear up: G-error gain (with its cap, rad/s) and pitch-rate gain; G limiter gain and lead (s). The
+// gear-down powered-approach law keeps the gentler 2.2 / 6 the carrier-landing assist was tuned with
+export const FCS = { kn: 4.5, cap: 1.0, kq: 8.0, kg: 12, lg: 0.08 };
+// induced-drag factor and the AoA band (deg) over which the separated-flow drag builds up
+export const AERO = { k: 0.10, a0: 18, a1: 36 };
 
 export function clBasic(a) {
   const ad = Math.abs(a) / D2R, s = a < 0 ? -1 : 1;
   let attached;
   if (ad <= 16) attached = 0.08 * (a / D2R);
-  else if (ad <= 22) { const t = (ad - 16) / 6; attached = s * (1.28 + 0.3 * Math.sin(t * Math.PI / 2)); }
-  else if (ad <= 30) { const t = (ad - 22) / 8; attached = s * (1.58 - 0.5 * t * t * (3 - 2 * t)); }
-  else attached = s * 1.08;
+  // past 16 deg the vortices off the leading-edge extensions keep the lift climbing, more slowly, to about 1.95 at 32 deg
+  else if (ad <= 32) { const t = (ad - 16) / 16; attached = s * (1.28 + 0.67 * Math.sin(t * Math.PI / 2)); }
+  else if (ad <= 44) { const t = (ad - 32) / 12; attached = s * (1.95 - 0.5 * t * t * (3 - 2 * t)); }
+  else attached = s * 1.45;
   const fp = 1.15 * Math.sin(2 * a);
-  const w = smooth(30, 42, ad);
+  const w = smooth(44, 58, ad);
   return attached * (1 - w) + fp * w;
 }
 function cd0(M) {
@@ -37,11 +43,11 @@ function cd0(M) {
   if (M > 0.8) { if (M < 1.05) { const t = (M - 0.8) / 0.25; w = 0.034 * t * t; } else w = 0.034 - 0.012 * Math.min(1, (M - 1.05) / 0.7); }
   return 0.0195 + w;
 }
-function kInd(M) { return M < 0.85 ? 0.118 : 0.118 + 0.14 * Math.min(1, (M - 0.85) / 0.65); }
+function kInd(M) { return M < 0.85 ? AERO.k : AERO.k + 0.14 * Math.min(1, (M - 0.85) / 0.65); }
 function cmStatic(a) {
   const ad = Math.abs(a), s = a < 0 ? -1 : 1;
   let cm = -0.22 * a;
-  if (ad > 0.42) cm += s * 0.22 * Math.min(ad - 0.42, 0.35);
+  if (ad > 0.55) cm += s * 0.22 * Math.min(ad - 0.55, 0.35);
   if (ad > 0.95) cm -= s * 0.9 * Math.sin(Math.min(ad - 0.95, 1.2));
   return cm;
 }
@@ -124,21 +130,21 @@ export class Aircraft {
     const ad = Math.abs(alpha);
     const hat = V > 1 ? 1 / (2 * V) : 0;
     const qc = q * JET.c * hat, pb = p * JET.b * hat, rb = r * JET.b * hat;
-    const stall = smooth(18 * D2R, 28 * D2R, ad);
+    const stall = smooth(26 * D2R, 38 * D2R, ad);
     let CL = clBasic(alpha) + 0.32 * this.flap * (1 - stall) + 3.2 * qc + 0.42 * this.de * (1 - 0.5 * stall);
     const K = kInd(M);
     const clA = Math.min(Math.abs(CL), 1.7);
     const sinA = Math.sin(alpha);
-    let CD = cd0(M) + this.storesDrag + K * clA * clA * (1 - stall) + 1.35 * sinA * sinA * smooth(14 * D2R, 32 * D2R, ad)
+    let CD = cd0(M) + this.storesDrag + K * clA * clA * (1 - stall) + 1.35 * sinA * sinA * smooth(AERO.a0 * D2R, AERO.a1 * D2R, ad)
       + 0.024 * this.gear + 0.06 * this.airbrakePos + 0.05 * this.flap + 0.45 * Math.sin(beta) ** 2 + 0.02 * this.hook;
     const CY = -0.85 * beta + 0.16 * this.dr;
     // roll
-    let Clp = -0.42 * (1 - 1.25 * smooth(20 * D2R, 34 * D2R, ad));
-    const Cl = -0.075 * beta + 0.16 * this.da + Clp * pb + 0.06 * rb + 0.012 * this.dr + this.dropRandom * smooth(18 * D2R, 27 * D2R, ad);
+    let Clp = -0.42 * (1 - 1.25 * smooth(28 * D2R, 42 * D2R, ad));
+    const Cl = -0.075 * beta + 0.16 * this.da + Clp * pb + 0.06 * rb + 0.012 * this.dr + this.dropRandom * smooth(28 * D2R, 36 * D2R, ad);
     // pitch
     const Cm = cmStatic(alpha) - 1.1 * this.de - 5.5 * qc + 0.03 * this.airbrakePos - 0.025 * this.flap + 0.006 * this.gear;
     // yaw
-    const Cnb = 0.11 * (1 - 0.85 * smooth(18 * D2R, 42 * D2R, ad));
+    const Cnb = 0.11 * (1 - 0.85 * smooth(26 * D2R, 46 * D2R, ad));
     const Cn = Cnb * beta + 0.075 * this.dr - 0.28 * rb - 0.006 * this.da - 0.03 * pb;
     out.CL = CL; out.CD = CD; out.CY = CY; out.Cl = Cl; out.Cm = Cm; out.Cn = Cn;
     return out;
@@ -294,22 +300,31 @@ export class Aircraft {
     let nCmd = sp >= 0 ? nNeutral + sp * (nMax - nNeutral) : nNeutral + sp * (nNeutral - nMin);
     // powered-approach law (gear down): gentle flight-path command, +/-1.2 g about flight-path hold
     if (gearDown && lim) nCmd = nNeutral + sp * 1.2;
-    const nMeas = this.nz;
-    const qSS = G0 * (nCmd - Math.cos(theta) * Math.cos(phi)) / V;
-    let qDes = qSS + 2.2 * (nCmd - nMeas) * G0 / V;
+    const nMeas = this.nz, ctc = Math.cos(theta) * Math.cos(phi);
+    const qSS = G0 * (nCmd - ctc) / V;
+    // the G-error term is capped: at low speed the jet can't make the commanded G, and an unbounded pitch-rate demand
+    // threw the nose far past the AoA limit into a slow pitch bobble
+    let qDes = qSS + (gearDown ? 2.2 * (nCmd - nMeas) * G0 / V : clamp(FCS.kn * (nCmd - nMeas) * G0 / V, -FCS.cap, FCS.cap));
     // hands-off catapult rotation: hold ~12 deg pitch
     if (this.handsOff > 0) { this.handsOff -= dt; if (Math.abs(sp) < 0.2) qDes = 1.2 * (12 * D2R - theta); }
     if (lim) {
-      const aMax = (gearDown ? 15 : 24.5) * D2R, aMin = -9 * D2R;
-      if (this.alpha > aMax - 4 * D2R) qDes = Math.min(qDes, 3.0 * (aMax - this.alpha));
-      if (this.alpha < aMin + 3 * D2R) qDes = Math.max(qDes, 3.0 * (aMin - this.alpha));
+      // AoA limiter with lead: the pitch rate that holds the present AoA (the flight path's own turn rate) plus a pull
+      // toward the limit, applied to the AoA predicted a quarter second ahead so a fast pull stops at the limit. The G
+      // limits become AoA limits too (the AoA where the jet would reach them, from the G it makes per degree now), so
+      // a hard pull at high speed doesn't overshoot the G limit either
+      const qHold = G0 * (nMeas - ctc) / V, aDot = q - qHold, aPred = this.alpha + aDot * 0.25;
+      let qHi = qHold + 2.5 * ((gearDown ? 15 : 30) * D2R - aPred), qLo = qHold + 2.5 * (-9 * D2R - aPred);
+      const zA = Math.max(qbar * S * 4.58 / (this.mass * G0), 2);
+      qHi = Math.min(qHi, qHold + FCS.kg * ((nMax - nMeas) / zA - aDot * FCS.lg));
+      qLo = Math.max(qLo, qHold + FCS.kg * ((nMin - nMeas) / zA - aDot * FCS.lg));
+      qDes = clamp(qDes, qLo, qHi);
     } else {
       // override: big pitch-rate authority; neutral stick lets the nose fall back out of post-stall (Cobra recovery)
       const aExcess = Math.abs(this.alpha) - 22 * D2R;
       if (Math.abs(sp) > 0.05) qDes = sp * 0.9;
       else qDes = aExcess > 0 ? -Math.sign(this.alpha) * Math.min(1.6, 2.2 * aExcess + 0.3) : qDes * 0.5;
     }
-    const qDot = (lim ? 6.0 : 9.0) * (qDes - q);
+    const qDot = (lim ? (gearDown ? 6.0 : FCS.kq) : 9.0) * (qDes - q);
     // required pitching moment
     const co = this._co2 || (this._co2 = {});
     const de0 = this.de; this.de = 0;
@@ -362,7 +377,7 @@ export class Aircraft {
     if (this.dropTimer < 0) { this.dropTimer = 0.6 + Math.random() * 1.2; this._dropTarget = (Math.random() - 0.5) * 0.06; }
     this.dropRandom += ((this._dropTarget || 0) - this.dropRandom) * Math.min(1, dt * 2);
     const ad = Math.abs(this.alpha);
-    this.buffet = smooth(14 * D2R, 24 * D2R, ad) * smooth(1500, 9000, this.qbar) + (this.mach > 0.92 && this.mach < 1.06 ? 0.25 : 0);
+    this.buffet = smooth(16 * D2R, 30 * D2R, ad) * smooth(1500, 9000, this.qbar) + (this.mach > 0.92 && this.mach < 1.06 ? 0.25 : 0);
     this._bufN = this._bufN || [0, 0, 0];
     this._bufN[0] = (Math.random() - 0.5) * 2; this._bufN[1] = (Math.random() - 0.5) * 2; this._bufN[2] = (Math.random() - 0.5) * 2;
     if (this.kinematic) { this.kinematic(dt, t); this.derivative(this.s, this.k[0], true); return; }

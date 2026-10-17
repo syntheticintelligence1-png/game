@@ -206,11 +206,13 @@ export class Ocean {
           for (int i = 0; i < ${MAX_SPLASH}; i++) {
             vec4 s = uSplash[i];
             float age = uTime - s.z; if (age < 0.0 || age > 30.0) continue;
-            float d = length(vWP.xz - s.xy);
-            float rr = s.w * (1.0 + age * 0.6) + age * 4.0;
+            float rr = s.w * (1.0 + age * 0.35) + age * 2.5;
+            // ragged churned patch, not a flat white plate: noise eats into the edge and the inside
+            float fs = texture(uNoiseTex, (vWP.xz - s.xy) / (6.0 + s.w * 0.4) + s.xy * 0.013).g;
+            float d = length(vWP.xz - s.xy) + (fnz - 0.5) * rr * 0.35 + (fs - 0.5) * rr * 0.3;
             float ring = exp(-pow((d - rr) / (2.0 + rr * 0.15), 2.0)) * exp(-age * 0.15);
-            float disk = smoothstep(rr, rr * 0.6, d) * exp(-age * 0.12) * 0.8;
-            foam += (ring + disk) * smoothstep(0.2, 0.6, fnz + 0.3);
+            float disk = smoothstep(rr, rr * 0.45, d) * exp(-age * 0.12) * 0.45 * smoothstep(0.2, 0.6, fs + 0.15);
+            foam += (ring * 0.6 + disk) * smoothstep(0.2, 0.6, fnz + 0.3);
           }
           float foamAmt = clamp(crestFoam * 0.6 + foam + shore, 0.0, 1.0) * (1.0 - smoothstep(4000.0, 15000.0, dist));
           vec3 foamCol = vec3(0.85) * (uSunColor * max(dot(N, uSunDir), 0.2) * csh / PI + uSkyAmb);

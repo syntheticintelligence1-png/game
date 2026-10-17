@@ -23,12 +23,23 @@ Web Audio, everything procedural (no asset files). Plain JS ES modules, bundled 
 - `node test/wingman.mjs [form,sead,ship,air,cat,misc]` (default all): formation, every order, SEAD and hunting
   (sead is slow, several minutes), Harpoons on the frigate and the destroyer, air combat, the catapult start, kill
   credit, despawn, being shot down. Kills are random, so the air part checks behaviour (shoots, keeps fighting).
+- `node test/flight_probe.mjs [str,itr,pull,roll,pitch,accel]`: flight-test card of the bare flight model (sustained
+  and instantaneous turn, full aft stick, roll, pitch response, acceleration). Run it before and after any flight.js change.
+- `node test/aim.mjs [tap,hold,track] [realistic]`: the easy controls: what a key tap and a key hold do to the nose,
+  and two keyboard "pilots" keeping the gun cross on a target. The track part varies from run to run (random buffet
+  and wing drop in flight.js); compare a few runs, not one.
 - `node test/glsl_check.mjs`: shader validation (needs glslangValidator). "'average' : function name is redeclaration"
   is a known false positive.
 - Real-browser screenshots: `node test/browser.mjs strike 10` and `node test/visual.mjs night` (Playwright + Chromium
   with SwiftShader; very slow, about 1 fps). test/browser_util.mjs imports Playwright from /opt/npm-tools; where that
   is missing, `npm install playwright-core` in a scratch folder and launch Chrome with
   `executablePath: '/usr/bin/google-chrome'` (that is how the helicopter and fleet were checked).
+- `node test/screens.mjs [menu,briefing,flight,carrier,wing,pause,debrief,crash]` with `SIZES=1100x650,1920x950`:
+  screenshots of every screen at several window sizes (steps the game at a fixed 60 fps, renders only the shots, so it
+  is quick). Prints `[bad]` for NaN / undefined drawn on the HUD or in the page and for a PLAY / START MISSION button
+  below the window. `node test/sound_levels.mjs`: peak and RMS of each sound, rendered offline through the real
+  audio engine. Both take `PLAYWRIGHT=<scratch>/node_modules/playwright-core/index.mjs CHROME=/usr/bin/google-chrome`
+  where /opt/npm-tools is missing; build first (screens.mjs loads dist/dev.html).
 
 ## Code map
 - `shell.html`: menu, pause, debrief, briefing, radio, coach and controls-card markup + CSS
@@ -56,9 +67,12 @@ Web Audio, everything procedural (no asset files). Plain JS ES modules, bundled 
   jet, climbs away by itself after a bolter or wave-off.
 - Return to the ship: `armed` = the player lowered the gear in the air (or the assist already flew an approach), so
   nothing shows after a catapult launch with the gear still down. Armed, gear down, within 20 km: the green "FLY HERE"
-  circle (joinPoint: 9 km behind the ship and 2.5 km to the side first, then it slides along the extended centre line
-  ahead of the jet), the banner at the top of the screen (joinHint / status), the coach card "Coming back to land", and
-  an auto-throttle holding 180 kt. Raising the gear gives back the throttle the player had before.
+  circle (joinPoint: `PATTERN` = 7 km behind the ship and 2 km to the side first, then it slides along the extended
+  centre line ahead of the jet), the banner at the top of the screen (joinHint / status), the coach card "Coming back
+  to land", and an auto-throttle holding 180 kt. Raising the gear gives back the throttle the player had before.
+- Bolter to trap in `land_easy bolter`: 4.6 min (it was 5.3 min with the old 9 km / 2.5 km pattern). 6 km / 2 km was
+  tried too: FAIR grades and more bank near the deck. Most of what is left is the straight-in from 7 km (about 100 s),
+  which is where canCapture takes over.
 - Landing practice (scenario 'approach'): Enter restarts the approach at any time; no enemy fighters spawn there.
 - carrierOps.js wire fix: once the wire had stopped the jet, the metering tension kept growing with the roll-back speed
   and flung the jet backwards onto its nose; metering now only runs while the jet is still moving forward (decided once
@@ -89,6 +103,10 @@ Web Audio, everything procedural (no asset files). Plain JS ES modules, bundled 
 - Orders: O opens the menu (drawn on screen), then 1 attack my target (the player's T mark: jet, radar/SAM, ship; he
   declines the bunker), 2 cover me (default), 3 hunt on your own (city strike: the air defenses, then the warships,
   only turning on bandits within 15 km meanwhile; otherwise any bandit), 4 rejoin, 5 go home (circles over the carrier). He answers on the radio ('wing' voice) and the HUD shows his status.
+- Hunting while there are still things for him to bomb: a dogfight still going after 90 s (`HUNT_FIGHT_MAX`; losing
+  the bandit for under 30 s doesn't restart the clock) is broken off ("bugging out, pressing to the target") and that
+  bandit is left alone for 60 s (`HUNT_IGNORE`). Two computer pilots in the same jet can circle each other for minutes
+  while the SAMs stay up.
 - Air combat is the ai.js fighter brain. `bvrScale = 0.6` (ai.js multiplies the AIM-120 max range by it): from further
   out, a bandit that turns away outruns the missile almost every time.
 - Kill credit: game.js calls `creditKill` (not `onKill`: Entity sets an instance field `onKill = null` that hid the
@@ -108,20 +126,80 @@ Web Audio, everything procedural (no asset files). Plain JS ES modules, bundled 
 - Honest limit: a fresh frigate (6 SAMs plus a close-in gun) shoots down a 2-Harpoon salvo almost every time, but it
   empties its SAMs. The wingman then says "She's out of SAMs" so the player knows the next attack gets through.
 
+## Flight feel (session 3: the player asked for physics tuning)
+- What they said: turning felt slow and heavy, and aiming felt too twitchy; they wanted something in between arcade
+  and realistic. The tuning knobs are named constants: `FCS` and `AERO` in flight.js, `EASY` in assist.js.
+- flight.js lift: past 16° AoA the lift keeps rising (vortex lift off the leading-edge extensions) to CL 1.95 at 32°;
+  the stall is at 26-38° (was 18-28°) and the pitch-up, roll damping, yaw stability and buffet bands moved up with it.
+  Induced drag `AERO.k` 0.10 (was 0.118); separated-flow drag builds over `AERO.a0..a1` = 18-36° (was 14-32°).
+- flight.js FCS, gear up: G-error gain `FCS.kn` 4.5 (was 2.2), capped at `FCS.cap` 1 rad/s (uncapped, it threw the nose
+  past the AoA limit at low speed into a slow pitch bobble); pitch-rate gain `FCS.kq` 8 (was 6). The gear-down
+  powered-approach law keeps the old 2.2 / 6 that the landing assist was tuned with. AoA limit 30° (was 24.5°), applied
+  to the AoA predicted 0.25 s ahead, and the G limits become AoA limits (`FCS.kg`, `FCS.lg`), so a hard pull stops at
+  the limit without overshoot.
+- Result (flight_probe, 1000 m, afterburner): sustained turn about 17°/s from 250 to 450 kt (was 12.5-16.7),
+  instantaneous 25°/s at 350 kt and 7.2 g (was 22.5°/s), roll rate unchanged (229°/s).
+- Easy controls (FlightAssist, `EASY`, the comment above it explains every number): a tap is a small nudge (rudder
+  first, so the nose moves at once), a hold is a full turn (the roll speeds up the longer A/D is held); letting go stops
+  the roll where the jet is and holds the nose on the heading it was swinging toward; W/S move the nose and it stays
+  where it was put; automatic back-pressure up to 5.5 g in a held turn; up to 80° of bank.
+- AI jets (ai.js move): they roll toward the turn first (`rollRate` 200°/s, less at low dynamic pressure, 1.5x when
+  dodging terrain) and the pull comes on as the wings get there, so their wings show where they are about to go.
+  `clMax` 1.5 (was 1.75) and `maxG` 8 (was 8.5): about a match for the player's jet. The wingman keeps maxG 9.
+- player.js LCOS gun sight: the target's acceleration is worked out from the real time between looks (it assumed 60 fps).
+
+## Looks and sound (session 3)
+- cameras.js chase camera: the spring now works the same at any frame rate (it sat speed x frame time too close: 4 m
+  at 60 fps, 12 m at 20 fps); distance 24.5 m (was 28); smooth shake (a few sines, not random jumps); a fine buzz
+  while the gun fires; a small zoom kick when the afterburner lights (`rig.fovKick`).
+- fx.js explosions (`BLAST`): the fireball is glowing smoke (`PT.BALL`, alpha blended, its heat cools at `cool` per
+  second) with a few additive flames on top; dozens of additive flames used to add up to a white blob. `fuel: true`
+  (aircraft) gives a bigger fireball and black smoke; at sea it is mostly grey steam; smaller shock ripple and
+  condensation puff. Burning wrecks falling from the sky lay flame and smoke evenly along their path; shot-down
+  enemy jets trail smoke.
+- fx.js trails: a trail only grew when its emitter covered `minStep` in one frame (fixed: the newest point rides
+  with the emitter until it is minStep from the one before). Vortex ribbons are capped at `VORTEX_MAX_ANGLE` width per
+  metre from the camera and fade out within 2-16 m of it (in hard turns the LEX vapor streamed past the chase camera
+  as a wide white band); LEX vapor lives 0.12 s. Contrails start closer to the nozzles.
+- ocean.js: the splash foam of crashes and explosions at sea is a ragged patch, not a flat white disc.
+- audio.js: `hitTick` (our bullets hitting: a 3.6 kHz click and a low thump on the master bus; that is where our own
+  gun is quietest, so it cuts through), `hullHit` (rounds and fragments hitting us), `killConfirm` (two-note chime
+  when the player destroys anything), `abLight` (deep whump when the afterburner lights; game.js spots it, not again
+  within 0.8 s of going out), and the wind roars louder and deeper above 2 g. The rate limiters start from `?? -1`
+  (`|| 0` swallowed a sound played at time 0). Check new sounds against the others with test/sound_levels.mjs.
+
+## Screens (session 3)
+- HUD scale `s = min(H/900, W/1500)` (was H/900), so in narrow windows the HUD stays clear of the cards at the
+  sides. `hud.cssHalfW` (half-width of the flight HUD, CSS px) and `hud.topRightCss` (bottom of the weapon list and
+  wingman text) are what the cards and the radio column lay out against.
+- Radio subtitles: a column at the top right under the weapon list, newest on top (shell.html #radio; comms.js
+  `place()` sets its top and its width, 300-460 px and never wider than the gap beside the HUD). They used to sit at
+  the bottom, over the jet in the outside view.
+- Coach and controls cards: as wide as the gap left of the HUD allows (280-388 px, guide.js `layout()`). The controls
+  card folds to its one-line form while the coach would run into it and comes back when there is room (Tab still
+  opens it). `game.cardRight` keeps the HUD messages clear of the cards.
+- The menu's PLAY bar and the briefing's START MISSION bar stick to the bottom of short windows (they were below the
+  fold under about 800-900 px); the title shrinks under 820 px.
+- NaN after a crash (the old known issue): the HUD drew the speed / altitude strip with no jet data. It now only draws
+  while there is a jet (`S.ias != null`). The "white screen" was the fireball flash.
+- The debrief tip matches how the mission was lost (flew into the ground, the sea or the ship, or shot down). Radio
+  text: no more "9.6 km to your right of you" or "fired a missile at you from to your right".
+- Checked with test/screens.mjs at 1100x600, 1100x650, 1366x650, 1920x950 and 960x1040.
+
 ## Player preferences (important)
 - Beginner who wants to have fun and roleplay as a military pilot. Wants plain English on screen and to always know what to press.
-- Keep the physics as they are; don't sink time into physics tuning unless asked. Ship builds fast, then let them test.
+- Session 3 asked for physics tuning and polish (feel, looks, sound, screens). Don't retune the physics again unless
+  asked. Ship builds fast, then let them test.
 - Don't use subagents.
 
 ## Known issues / next ideas
-- Seen once in a slow software-rendered browser: after a crash into a hillside, the HUD showed NaN speed/altitude and the screen went white.
-  Not reproduced headlessly (test/crash_hill.mjs). Next step: hook game.physics to catch the first non-finite value in player.ac.s.
-- On short screens (under about 650 px tall) the coach card and the controls card overlap.
-- In the outside view the radio box covers the lower part of the jet.
-- Carrier landing: after a bolter in a mission, flying the green-circle pattern back takes about 3 minutes (a shorter
-  downwind leg, joinPoint OUT_BACK 7500, was not tested).
-- Five-phase plan agreed with the player; build one phase, let them play, wait for "continue":
-  1 wingman (done), 2 free play + command room (CIC map, ship orders, time controls), 3 strike wing / naval strike,
-  4 carrier battle group, 5 extras.
-- Other ideas the player picked but not built yet: night CAS, sound and vapor polish, more jets (F-35C stealth,
-  EA-18G jammer), fly-through hoops for practice, a shorter go-around, night landings in rough seas.
+- `wingman.mjs sead` can still fail: the air combat is random, and now and then the wingman is shot down before he
+  gets the 3 air defenses the check asks for (1 run in 8 with the hunt break-off; about 5 in 8 before it). Run it a
+  few times before blaming a change. `aim.mjs` numbers also change from run to run.
+- A bolter still costs about 4.6 minutes back to the trap; a shorter go-around would need a new pattern, not just a
+  smaller one (6 km / 2 km gave FAIR grades).
+- Five-phase plan agreed with the player: 1 wingman (done), 2 free play + command room (CIC map, ship orders, time
+  controls), 3 strike wing / naval strike, 4 carrier battle group, 5 extras. Phases 2-5 are on hold (after phase 1 the
+  player asked for tuning and polish instead); ask before starting one.
+- Other ideas the player picked but not built yet: night CAS, more jets (F-35C stealth, EA-18G jammer), fly-through
+  hoops for practice, a shorter go-around, night landings in rough seas.

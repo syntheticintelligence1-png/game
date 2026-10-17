@@ -35,6 +35,9 @@ const CALL = { aim120: 'Fox three', aim9x: 'Fox two', gbu39: 'bombs away', agm88
 const NUMW = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
 // formation slot in the leader's flight-path frame: metres right, up, ahead (a little ahead keeps him in the outside view)
 const SLOT = new THREE.Vector3(30, 3, 14);
+// hunting with targets left to attack: a dogfight still going after HUNT_FIGHT_MAX s is broken off and that bandit
+// left alone for HUNT_IGNORE s (two computer pilots in the same jet can circle each other for minutes)
+const HUNT_FIGHT_MAX = 90, HUNT_IGNORE = 60;
 const CAT = CATS[1], CAT_LEN = CAT.z0 - CAT.z1, CAT_V = 80, CAT_ACC = CAT_V * CAT_V / (2 * CAT_LEN);
 const KNEEL = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -1.6 * D2R);
 const title = (s) => s.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase());
@@ -53,6 +56,7 @@ export class Wingman extends AIJet {
     // test, or he could never fire his long-range missiles.
     const R = this.radar; R.inCoverage = (tp) => R.forward(_v3).dot(_v4.copy(tp).sub(R.pos).normalize()) > Math.cos(R.azHalf);
     this.order = 'cover'; this.orderTgt = null; this.strike = null; this.kills = 0; this.idleT = 0;
+    this.fightFoe = null; this.fightAt = 0; this.fightSeen = 0; this.ignore = null;
     this.mode = 'join'; this.joined = false; this.slotErr = Infinity;
     this.slot = new THREE.Vector3(); this.slotPrev = new THREE.Vector3(); this.slotVel = new THREE.Vector3(); this.slotOk = false; this.slotR = new THREE.Vector3(1, 0, 0);
     this.accS = new THREE.Vector3(); this.gearK = 0; this.gearUpAt = 0;
@@ -182,7 +186,7 @@ export class Wingman extends AIJet {
     const reach = this.strike || o === 'attack' ? 12000 : o === 'hunt' ? (M && M.kind === 'strike' && this.huntTargets().length ? 15000 : 90000) : 0;
     let best = null, bs = Infinity;
     for (const j of g.aiJets) {
-      if (!this.canFight(j)) continue;
+      if (!this.canFight(j) || (o === 'hunt' && this.ignore && this.ignore.j === j && g.time < this.ignore.until)) continue;
       const R = j.pos.distanceTo(this.pos);
       if (reach ? R > reach : R > 15000 && j.pos.distanceTo(P.pos) > 25000) continue;
       const s = R * (j === this.foe ? 0.7 : 1); if (s < bs) { bs = s; best = j; }
@@ -201,9 +205,19 @@ export class Wingman extends AIJet {
     super.think();
     // covering: don't chase a bandit far from the leader
     if (this.order === 'cover' && this.foe && this.state !== 'defend' && this.foe.pos.distanceTo(P.pos) > 32000) { this.foe = null; this.state = 'patrol'; this.radar.stt = null; }
+    if (this.order === 'hunt' && this.huntTargets().length) {
+      // losing the bandit for a moment (dodging a missile, out of radar view) doesn't restart the clock
+      if (this.foe && (this.foe !== this.fightFoe || g.time - this.fightSeen > 30)) { this.fightFoe = this.foe; this.fightAt = g.time; }
+      if (this.foe) this.fightSeen = g.time;
+      if (this.foe && this.state !== 'defend' && g.time - this.fightAt > HUNT_FIGHT_MAX) {
+        this.say('bugging out, pressing to the target.', `Your wingman can't finish ${this.foe.name} quickly, so he breaks off and goes back to his own targets.`, { key: 'w-brk', every: 30 });
+        this.ignore = { j: this.foe, until: g.time + HUNT_IGNORE };
+        this.foe = null; this.fightFoe = null; this.state = 'patrol'; this.radar.stt = null;
+      }
+    } else this.fightFoe = null;
     if (this.foe && this.state === 'intercept' && was === 'patrol') {
       const G = g.comms.geo(this.foe.pos);
-      this.say(`engaged, bandit ${G.clock} o'clock, ${G.km} km.`, `Your wingman is attacking ${this.foe.name}, ${G.km} km ${G.dir} of you.`, { key: 'w-eng', every: 12 });
+      this.say(`engaged, bandit ${G.clock} o'clock, ${G.km} km.`, `Your wingman is attacking ${this.foe.name}, ${G.km} km ${G.dir}.`, { key: 'w-eng', every: 12 });
     }
     if (this.state === 'defend' && was !== 'defend') this.say('defending, missile on me!', 'An enemy missile is chasing your wingman. He turns away from it and drops chaff and flares.', { key: 'w-def', every: 15, pri: 3, ttl: 4 });
     this.thinkStrike();

@@ -12,30 +12,36 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const kb = (...keys) => keys.map((x) => `<kbd>${esc(x)}</kbd>`).join('');
 const GROUND_WEAPONS = new Set(['agm65', 'agm84', 'agm88', 'gbu12', 'gbu31', 'gbu39', 'mk84', 'cbu']);
 const GROUND_KINDS = new Set(['ground', 'sam', 'structure', 'ship']);
+const CARD_MIN_W = 280, CARD_MAX_W = 388; // outer width of the coach / controls cards (px)
+const KEYS_FOLD_GAP = 10, KEYS_UNFOLD_GAP = 30; // px between coach and controls card (unfold needs more: no flicker)
 
 export class Guide {
   constructor(game, doc = document) {
-    this.g = game;
+    this.g = game; this.doc = doc;
     this.coach = doc.getElementById('coach');
     this.keysCard = doc.getElementById('keys-card');
     this.last = ''; this.t = 0;
     this.launchedAt = -1e9; this.prevCat = 'none';
     let open = true;
     try { const v = localStorage.getItem('aegis-keys-open'); open = v != null ? v === '1' : true; } catch (e) { open = true; }
-    this.keysOpen = open; this.applyKeys();
+    // folded: the coach needs the controls card's room right now; forced: Tab asked for the card anyway
+    this.keysOpen = open; this.keysFolded = false; this.keysForced = false; this.keysH = 0; this.measuredAt = ''; this.cardW = 0;
+    this.applyKeys();
   }
 
+  keysShown() { return this.keysOpen && (!this.keysFolded || this.keysForced); }
   toggleKeys() {
-    this.keysOpen = !this.keysOpen; this.applyKeys();
+    if (this.keysShown()) { this.keysOpen = false; this.keysForced = false; } else { this.keysOpen = true; this.keysForced = this.keysFolded; }
+    this.applyKeys();
     try { localStorage.setItem('aegis-keys-open', this.keysOpen ? '1' : '0'); } catch (e) { /* storage unavailable */ }
   }
-  applyKeys() { this.keysCard.classList.toggle('collapsed', !this.keysOpen); }
+  applyKeys() { this.keysCard.classList.toggle('collapsed', !this.keysShown()); }
 
   update(dt) {
     const g = this.g;
     const show = !g.attract;
     this.coach.hidden = !show; this.keysCard.hidden = !show;
-    if (!show) { this.last = ''; return; }
+    if (!show) { this.last = ''; this.keysForced = false; return; }
     if (g.input.hit('Tab')) this.toggleKeys();
     const cs = g.ops.cat.state;
     if (cs === 'stroke' && this.prevCat !== 'stroke') this.launchedAt = g.time;
@@ -43,6 +49,26 @@ export class Guide {
     this.t -= dt; if (this.t > 0) return; this.t = 0.15;
     const html = this.render(this.compute());
     if (html !== this.last) { this.coach.innerHTML = html; this.last = html; }
+    this.layout();
+  }
+
+  // Card width: as wide as the gap left of the HUD allows. The controls card folds to its one-line form while the
+  // coach would run into it (short windows, long alerts) and comes back when there is room again.
+  layout() {
+    const K = this.keysCard, root = this.doc.documentElement;
+    if (!K.getBoundingClientRect || !this.coach.getBoundingClientRect || !root) return; // no layout to measure (headless tests)
+    const W = innerWidth, H = innerHeight, half = this.g.hud ? this.g.hud.cssHalfW : 0;
+    const cw = Math.round(Math.min(W - 32, Math.max(CARD_MIN_W, Math.min(CARD_MAX_W, W / 2 - half - 26))));
+    if (cw !== this.cardW) { this.cardW = cw; root.style.setProperty('--card-w', `${cw}px`); }
+    this.g.cardRight = 16 + cw;
+    // height of the open card: measured while it is open, or by opening it for one layout pass after a resize
+    // (and every few seconds, in case the web fonts arrived and changed the text wrapping)
+    const at = `${cw}x${H}:${Math.floor(performance.now() / 3000)}`;
+    if (!K.classList.contains('collapsed')) { this.keysH = K.getBoundingClientRect().height; this.measuredAt = at; }
+    else if (this.measuredAt !== at) { K.classList.remove('collapsed'); this.keysH = K.getBoundingClientRect().height; this.measuredAt = at; K.classList.add('collapsed'); }
+    const coachBottom = this.coach.getBoundingClientRect().bottom, keysTop = K.getBoundingClientRect().bottom - this.keysH;
+    const fold = coachBottom + (this.keysFolded ? KEYS_UNFOLD_GAP : KEYS_FOLD_GAP) > keysTop;
+    if (fold !== this.keysFolded) { this.keysFolded = fold; this.applyKeys(); }
   }
 
   // where something is, in words: "6.2 km, 40° to your right"

@@ -13,30 +13,76 @@ const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 const smooth = (e0, e1, x) => { let t = (x - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
+// Tuning for the easy controls (degrees, seconds, g). Bank: A/D move the bank target at roll0 deg/s the moment they
+// are pressed, speeding up by roll1 deg/s for every second held, so a tap gives a few degrees and a hold a full turn;
+// let go and, after levelDelay s, the wings come level at level0 + level1 * bank deg/s (quick from a steep bank, gentle
+// near level). gAuto: the most G the automatic back-pressure pulls in a held turn. Pitch: S/W move the nose
+// by aim0 deg/s at the press, speeding up by aim1 deg/s per second held. A/D pressed for less than tap s near wings
+// level is a nudge: rudder moves the nose sideways at once. Letting go of A/D stops the roll about stopLead s on from
+// where the jet is. After a press of at most fineMax s the nose is then held on the heading it was swinging toward
+// (where it would be fineLead s later) while a gentle bank (at most fineBank deg) brings the flight path round under
+// it in about fineT s; after a longer turn the wings just come level.
+export const EASY = { bankMax: 80, roll0: 50, roll1: 900, levelDelay: 0.2, level0: 30, level1: 3.2, gAuto: 5.5, aim0: 3, aim1: 60, tap: 0.3, tapYaw: 0.35, stopLead: 0.12, fineMax: 0.6, fineLead: 0.45, fineBank: 35, fineT: 1.0 };
+
 export class FlightAssist {
   constructor() { this.reset(); }
-  reset() { this.bankTgt = 0; this.pull = 0; this.dir = 0; this.hold = 0; }
+  reset() { this.bankTgt = 0; this.dir = 0; this.hold = 0; this.tR = 0; this.dA = 0; this.wantP = 0; this.tP = 0; this.fine = null; this.hdgPrev = null; }
 
-  // keys: { left, right, pull, push } booleans; returns { pitch, roll } stick in [-1, 1]
+  // keys: { left, right, pull, push } booleans; returns { pitch, roll, yaw } stick in [-1, 1]
   update(dt, ac, keys) {
+    const E = EASY;
     const theta = ac.pitchDeg() * D2R;
     const phi = ac.rollDeg() * D2R;
     const gearDown = ac.gear > 0.5;
-    const bankMax = (gearDown ? 35 : 78) * D2R;
+    const bankMax = (gearDown ? 35 : E.bankMax) * D2R;
+    const V = Math.max(ac.tas, 30);
     // authority of the bank-hold fades out near the vertical, where "bank" stops meaning anything
     const auth = smooth(75 * D2R, 58 * D2R, Math.abs(theta));
+    // nose heading, and the heading of the flight path through the air (the wind doesn't count)
+    const f = ac.forward(_va), hdg = Math.atan2(f.x, -f.z), v = ac.s.v, w = ac.env.wind;
+    const pathHdg = Math.atan2(v.x - w.x, -(v.z - w.z));
+    const hdgRate = this.hdgPrev == null ? 0 : wrap(hdg - this.hdgPrev) / Math.max(dt, 1e-3); this.hdgPrev = hdg;
 
-    // --- bank target: ramps while A/D is held (taps give small banks), returns to level when released
+    // --- bank target: ramps while A/D is held, returns to level when released
     const dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
-    if (dir && dir !== this.dir && Math.sign(this.bankTgt) !== dir) this.bankTgt = clamp(phi, -bankMax, bankMax) * auth; // start from where the jet is
+    const p = -ac.s.w.z;
+    if (gearDown || auth < 0.9 || ac.onGround) this.fine = null;
+    if (dir !== this.dir) {
+      if (!dir && this.dir) {
+        // let go: the roll stops about where the jet has got to (the target can have run well ahead of a quick tap,
+        // and rolling on after the key is up is what makes the nose overshoot)
+        const stop = phi + p * E.stopLead;
+        if ((this.bankTgt - stop) * this.dir > 0) this.bankTgt = clamp(stop, -bankMax, bankMax);
+        // after a short press the nose is held on the heading it was swinging toward (below), so it doesn't spring back
+        if (this.tR <= E.fineMax && auth > 0.9 && !gearDown && !ac.onGround) this.fine = { psi: hdg + hdgRate * E.fineLead, t: 0, phi0: Math.abs(phi) };
+      }
+      this.tR = 0;
+      if (dir) { this.fine = null; if (Math.sign(this.bankTgt) !== dir) this.bankTgt = clamp(phi, -bankMax, bankMax) * auth; } // start from where the jet is
+    }
     this.dir = dir;
     const prev = this.bankTgt;
-    // a short "sticky" pause after a tap lets small taps make small, visible corrections
-    if (dir) { this.bankTgt = clamp(this.bankTgt + dir * 220 * D2R * dt, -bankMax, bankMax); this.hold = 0.18; }
-    else if ((this.hold -= dt) <= 0) this.bankTgt -= Math.sign(this.bankTgt) * Math.min(Math.abs(this.bankTgt), 260 * D2R * dt);
+    let fineYaw = 0;
+    const level = () => { const b = Math.abs(this.bankTgt); this.bankTgt -= Math.sign(this.bankTgt) * Math.min(b, (E.level0 + E.level1 * b / D2R) * D2R * dt); };
+    if (dir) {
+      this.tR += dt;
+      // rolling back toward level from the other side goes at full speed; rolling further into the turn speeds up the
+      // longer the key is held
+      const r = Math.sign(this.bankTgt) === -dir ? 260 : E.roll0 + E.roll1 * this.tR;
+      this.bankTgt = clamp(this.bankTgt + dir * r * D2R * dt, -bankMax, bankMax); this.hold = E.levelDelay;
+    } else if (keys.pull && !gearDown && Math.abs(this.bankTgt) > 25 * D2R) { this.hold = E.levelDelay; this.fine = null; } // pulling: the turn goes on
+    else if (this.fine) {
+      // rudder (sideslip) holds the nose on the heading it was swinging toward when the key came up, while a gentle bank
+      // brings the flight path round under it; the bank eases from where it was toward that one, so it never rocks
+      const F = this.fine; F.t += dt;
+      const ePath = wrap(F.psi - pathHdg), eNose = wrap(F.psi - hdg);
+      const want = clamp(Math.atan(V * ePath / (G0 * E.fineT)), -E.fineBank * D2R, E.fineBank * D2R);
+      const step = (E.level0 + E.level1 * Math.abs(this.bankTgt) / D2R) * D2R * dt;
+      this.bankTgt += clamp(want - this.bankTgt, -step, step);
+      fineYaw = clamp((3 * eNose - 0.3 * hdgRate) / (9 * D2R), -0.6, 0.6);
+      if (F.t > 4 || (Math.abs(ePath) < 0.05 * D2R && Math.abs(eNose) < 0.1 * D2R) || Math.abs(phi) > Math.max(F.phi0, E.fineBank * D2R) + 30 * D2R) this.fine = null;
+    } else if ((this.hold -= dt) <= 0) level();
     const tgtRate = (this.bankTgt - prev) / Math.max(dt, 1e-3);
     // roll-rate demand: feed-forward of the target motion plus a correction on the *predicted* bank (less overshoot)
-    const p = -ac.s.w.z;
     let err = this.bankTgt - (phi + p * 0.16); err = Math.atan2(Math.sin(err), Math.cos(err));
     let pDes = tgtRate + 4.0 * err;
     pDes = clamp(pDes, -200 * D2R, 200 * D2R);
@@ -44,21 +90,33 @@ export class FlightAssist {
     // near vertical: plain roll-rate control from the keys
     roll = roll * auth + dir * 0.7 * (1 - auth);
 
-    // --- pitch: automatic back-pressure for a level turn, plus the player's fine W/S input
-    const want = (keys.pull ? 1 : 0) - (keys.push ? 1 : 0);
-    if (want) this.pull = clamp(this.pull + want * 2.6 * dt, -1, 1);
-    else this.pull -= Math.sign(this.pull) * Math.min(Math.abs(this.pull), 7 * dt);
+    // --- pitch: automatic back-pressure for a level turn, plus the player's W/S input
     // pull slightly ahead of the bank so the nose starts tracking round as the jet rolls in
     const phiEff = phi + clamp(this.bankTgt - phi, -25 * D2R, 25 * D2R) * 0.5;
     const cphi = Math.cos(phiEff);
-    let nAuto = Math.cos(theta) * (cphi > 0.2 ? 1 / cphi : 1);          // g for a level turn at this bank
-    nAuto = Math.min(nAuto, gearDown ? 1.6 : 4.6) * auth + Math.cos(theta) * (1 - auth);
+    let nAuto = cphi > 0.05 ? Math.cos(theta) / Math.max(cphi, 1 / E.gAuto) : Math.cos(theta); // g for a level turn at this bank
+    nAuto = Math.min(nAuto, gearDown ? 1.6 : E.gAuto) * auth + Math.cos(theta) * (1 - auth);
     if (Math.abs(phi) > 100 * D2R) nAuto = 0;                            // inverted: don't pull toward the ground
-    const spAuto = ac.stickForG(nAuto);
-    const pc = this.pull * Math.abs(this.pull) * 0.55 + this.pull * 0.45;  // finer near centre
-    const pitch = pc >= 0 ? spAuto + pc * (1 - spAuto) : spAuto + pc * (1 + spAuto);
-    // a touch of rudder leads the roll-in, so the nose moves the instant A/D is pressed
-    const yaw = clamp(err * 1.1, -0.45, 0.45) * auth * (dir ? 1 : 0.4);
+    // W/S move the nose: this.dA is extra angle of attack on top of the automatic back-pressure (the G it takes is
+    // zA per radian). Let go and it bleeds off exactly as fast as the flight path catches up with the nose, so the nose
+    // stays where it was put instead of springing back
+    const zA = Math.max(ac.qbar * JET.S * 4.58 / (ac.mass * G0), 1);
+    const want = (keys.pull ? 1 : 0) - (keys.push ? 1 : 0);
+    this.tP = want && want === this.wantP ? this.tP + dt : 0; this.wantP = want;
+    if (want) {
+      // pressing against a pull (or a push) still in hand cancels it quickly
+      const r = Math.sign(this.dA) === -want ? Math.max(40, E.aim0 + E.aim1 * this.tP) : E.aim0 + E.aim1 * this.tP;
+      this.dA += want * r * D2R * dt;
+    } else this.dA *= Math.exp(-dt / clamp(V / (G0 * zA), 0.2, 1.0));
+    const nLo = gearDown ? nAuto - 1.2 : -3.0, nHi = gearDown ? nAuto + 1.2 : 7.5;
+    // no wind-up past the G limits or the AoA limiter (lift is about zA * AoA)
+    this.dA = clamp(this.dA, (nLo - nAuto) / zA, Math.min((nHi - nAuto) / zA, Math.max(0, 31 * D2R - nAuto / zA)));
+    const pitch = ac.stickForG(nAuto + zA * this.dA);
+    // rudder: the nose moves sideways the instant A/D is pressed (all of a tap is rudder at first), then a touch of it
+    // leads the roll-in
+    let yaw = clamp(err * 1.1, -0.45, 0.45) * auth * (dir ? 1 : 0.4);
+    if (dir && this.tR < E.tap && !gearDown) yaw = dir * E.tapYaw * Math.min(1, this.tR / 0.06) * (1 - this.tR / E.tap) + yaw * (this.tR / E.tap);
+    if (this.fine) yaw = fineYaw * auth;
     return { pitch: clamp(pitch, -1, 1), roll: clamp(roll, -1, 1), yaw };
   }
 }
@@ -73,7 +131,9 @@ export class FlightAssist {
 export const ON_SPEED_AOA = 8.1;
 // the green "fly here" circle that leads the jet into the approach shows up this close to the ship (gear down)
 const JOIN_RANGE = 20000;
-const MIL = 0.8, PATTERN_KT = 180, OUT_BACK = 9000;
+const MIL = 0.8, PATTERN_KT = 180;
+// where the green circle waits before the jet turns in ('out' leg): metres behind the ship, metres off to the side
+export const PATTERN = { back: 7000, side: 2000 };
 const _f = new THREE.Vector3(), _jp = new THREE.Vector3();
 // lift coefficient of the trimmed jet with the gear down, angle of attack in degrees (flight.js: 0.08 per degree below
 // the stall, +0.32 with full flaps, about -0.02 lost to the trim elevator)
@@ -142,14 +202,14 @@ export class LandingAssist {
   // the green "fly here" circle (gear down, assist off), a little like the legs of a real landing pattern. Behind the
   // ship and not too far off to the side ('final') it slides along the extended centre line, ahead of the jet and on
   // the glide slope: flying straight at it cuts in toward the landing line at about 30° and then eases onto it, on the
-  // glide path, which is where the assist takes over. From anywhere else ('out') it waits 9 km behind the ship, 2.5 km
-  // off to the jet's side, so a jet coming from ahead or beside the ship first flies past it, then turns in.
+  // glide path, which is where the assist takes over. From anywhere else ('out') it waits behind the ship and off to the
+  // jet's side (PATTERN), so a jet coming from ahead or beside the ship first flies past it, then turns in.
   joinPoint(g, out) {
     const ops = g.ops, x = ops.rangeToTD, y = ops.latErr, ay = Math.abs(y);
     if (ay > 400) this.side = Math.sign(y);
-    const outP = g.approachPoint(OUT_BACK, this.side * 2500, out);
+    const outP = g.approachPoint(PATTERN.back, this.side * PATTERN.side, out);
     if (this.leg === 'final') { if (x < 1500 || ay > 0.6 * x - 600) this.leg = 'out'; }
-    else if (ay < 0.6 * x - 1300 && (ops.vAlong > 0 || x > OUT_BACK - 500 || outP.distanceTo(g.player.ac.s.p) < 1500)) this.leg = 'final';
+    else if (ay < 0.6 * x - 1300 && (ops.vAlong > 0 || x > PATTERN.back - 500 || outP.distanceTo(g.player.ac.s.p) < 1500)) this.leg = 'final';
     return this.leg === 'final' ? g.approachPoint(x - Math.max(2000, 1.6 * ay), 0, out) : outP;
   }
 

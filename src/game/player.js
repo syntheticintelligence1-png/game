@@ -89,8 +89,9 @@ export class Player extends Entity {
   }
 
   damage(amount, src, point) {
-    if (this.game.opts.invulnerable) { if (amount > 5) { this.game.rig.shake = Math.min(2, this.game.rig.shake + 0.6); this.game.msg('HIT! (PRACTICE: NO DAMAGE)', 1, '#ffb080'); } return; }
+    if (this.game.opts.invulnerable) { if (amount > 5) { this.game.rig.shake = Math.min(2, this.game.rig.shake + 0.6); this.game.audio.hullHit(0.6); this.game.msg('HIT! (PRACTICE: NO DAMAGE)', 1, '#ffb080'); } return; }
     super.damage(amount, src, point);
+    if (this.alive && amount > 2) this.game.audio.hullHit(amount / 30);
     if (this.alive && amount > 5) { this.game.rig.shake = Math.min(2, this.game.rig.shake + amount / 40); if (this.hp < 70) this.ac.engineHealth = Math.max(0.25, this.hp / 100); }
   }
   get airWeapon() { return this.sel === 'aim9x' || this.sel === 'aim120'; }
@@ -169,14 +170,14 @@ export class Player extends Entity {
     const humid = s.p.y < 3000;
     const vort = (ac.nz > 4.2 || Math.abs(ac.alpha) > 14 * D2R) && ac.tas > 90 && humid;
     if (vort) {
-      if (!this.trails.vl) { this.trails.vl = g.fx.trails.create({ kind: 'vortex', width: 0.3, opacity: 0.55 }); this.trails.vr = g.fx.trails.create({ kind: 'vortex', width: 0.3, opacity: 0.55 }); this.trails.ll = g.fx.trails.create({ kind: 'vortex', width: 1.6, opacity: 0.32, maxAge: 0.7, grow: 2.5 }); this.trails.lr = g.fx.trails.create({ kind: 'vortex', width: 1.6, opacity: 0.32, maxAge: 0.7, grow: 2.5 }); }
+      if (!this.trails.vl) { this.trails.vl = g.fx.trails.create({ kind: 'vortex', width: 0.3, opacity: 0.55 }); this.trails.vr = g.fx.trails.create({ kind: 'vortex', width: 0.3, opacity: 0.55 }); this.trails.ll = g.fx.trails.create({ kind: 'vortex', width: 1.0, opacity: 0.32, maxAge: 0.12, grow: 3 }); this.trails.lr = g.fx.trails.create({ kind: 'vortex', width: 1.0, opacity: 0.32, maxAge: 0.12, grow: 3 }); }
       this.trails.vl.add(wt(JET_GEOM.wingtipL)); this.trails.vr.add(wt(JET_GEOM.wingtipR));
       if (Math.abs(ac.alpha) > 12 * D2R) { this.trails.ll.add(wt(JET_GEOM.lexL)); this.trails.lr.add(wt(JET_GEOM.lexR)); }
     } else if (this.trails.vl) { for (const k of ['vl', 'vr', 'll', 'lr']) { this.trails[k].stop(); this.trails[k] = null; } }
     // contrails at altitude
     if (s.p.y > 8800 && ac.rpm > 0.8) {
       if (!this.trails.c1) { this.trails.c1 = g.fx.trails.create({ kind: 'contrail', width: 1.4, opacity: 0.5 }); this.trails.c2 = g.fx.trails.create({ kind: 'contrail', width: 1.4, opacity: 0.5 }); }
-      this.trails.c1.add(wt(JET_GEOM.nozzleL).addScaledVector(s.v, -0.4)); this.trails.c2.add(wt(JET_GEOM.nozzleR).addScaledVector(s.v, -0.4));
+      this.trails.c1.add(wt(JET_GEOM.nozzleL).addScaledVector(s.v, -0.2)); this.trails.c2.add(wt(JET_GEOM.nozzleR).addScaledVector(s.v, -0.2));
     } else if (this.trails.c1) { this.trails.c1.stop(); this.trails.c2.stop(); this.trails.c1 = this.trails.c2 = null; }
     // transonic vapor cone (Prandtl-Glauert condensation) in humid air
     if (g.vaporCone) { const k = ac.mach > 0.93 && ac.mach < 1.07 && humid ? 1 - Math.abs(ac.mach - 1.0) / 0.07 : 0; g.vaporCone.set(k); }
@@ -411,8 +412,13 @@ export class Player extends Entity {
       const G = {};
       const gunDir = _v.set(0, 0.0262, -1).normalize().applyQuaternion(s.q).clone();
       if (this.radar.stt && this.radar.stt.pos.distanceTo(s.p) < 3000) {
-        const T = this.radar.stt; T._acc = T._acc || new THREE.Vector3(); T._pv = T._pv || T.vel.clone();
-        T._acc.lerp(_v2.copy(T.vel).sub(T._pv).multiplyScalar(60), 0.1); T._pv.copy(T.vel);
+        // target acceleration from its velocity change since the last look (this runs once per drawn frame, whatever the
+        // frame rate, and some frames have no physics step in between)
+        const T = this.radar.stt, now = g.time;
+        const age = now - T._pt;
+        if (!T._acc || !(age >= 0 && age <= 0.5)) { T._acc = new THREE.Vector3(); T._pv = T.vel.clone(); T._pt = now; }
+        const dtS = now - T._pt;
+        if (dtS > 1e-4) { T._acc.lerp(_v2.copy(T.vel).sub(T._pv).divideScalar(dtS), 1 - Math.exp(-dtS / 0.17)); T._pv.copy(T.vel); T._pt = now; }
         G.lcos = lcosSolution(s.p, s.v, gunDir, T, T._acc);
       }
       // EEGS-style funnel from bullets fired over the last 1.5 s
