@@ -1,0 +1,11 @@
+<!doctype html><html><body><canvas id=c width=64 height=64></canvas><script>
+const gl = document.getElementById('c').getContext('webgl2');
+const out = {};
+if (!gl) { out.err = 'no webgl2'; } else {
+  out.renderer = gl.getParameter(gl.RENDERER); out.version = gl.getParameter(gl.VERSION);
+  out.exts = gl.getSupportedExtensions();
+  out.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE); out.max3D = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE);
+  out.maxVSTex = gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS); out.maxUniformVec = gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS);
+}
+document.title = 'done'; window.__probe = out;
+</script></body></html>

@@ -1,0 +1,364 @@
+<title>Aegis Spear</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=B612:wght@400;700&family=B612+Mono:wght@400;700&family=Big+Shoulders+Stencil+Display:wght@700;900&display=swap">
+<style>
+/* Layout: full-bleed live 3D stage; a left-hand flight-deck card over a scrim, collapsing to one column on phones. */
+:root {
+  --sea: #070b10;        /* night-sea navy black */
+  --deck: #141b22;       /* flight deck grey-blue */
+  --deck-2: #1c252e;
+  --rule: #2f3b46;
+  --text: #dbe4ea;
+  --muted: #8d9ba6;
+  --amber: #f3a83a;      /* IFLOLS meatball */
+  --datum: #4fe08a;      /* datum lights / HUD */
+  --alarm: #ff5b4b;
+  --f-display: "Big Shoulders Stencil Display", "Arial Narrow", Impact, sans-serif;
+  --f-body: "B612", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --f-data: "B612 Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--sea); color: var(--text); font-family: var(--f-body); overflow: hidden; }
+#stage { position: fixed; inset: 0; background: var(--sea); }
+#stage canvas.gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+#stage canvas.hud { position: absolute; inset: 0; pointer-events: none; }
+.overlay { position: fixed; inset: 0; z-index: 5; display: flex; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px)); overflow-y: auto; }
+
+/* loading */
+#loading { align-items: center; justify-content: center; background: radial-gradient(120% 90% at 30% 20%, #10202c 0%, var(--sea) 60%); }
+.load-card { width: min(560px, 100%); display: grid; gap: 18px; }
+.brand { font-family: var(--f-display); font-weight: 900; letter-spacing: 0.06em; line-height: 0.86; font-size: clamp(56px, 11vw, 112px); text-wrap: balance; margin: 0; color: var(--text); }
+.brand span { color: var(--amber); }
+.lens { display: flex; align-items: center; gap: 6px; }
+.lens i { width: 18px; height: 6px; border-radius: 1px; background: var(--datum); box-shadow: 0 0 10px var(--datum); }
+.lens b { width: 14px; height: 14px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 14px var(--amber); margin: 0 6px; }
+.tagline { font-family: var(--f-data); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.bar { height: 4px; background: var(--deck-2); overflow: hidden; }
+.bar > div { height: 100%; background: var(--amber); transform-origin: left; transform: scaleX(0); transition: transform 0.25s ease-out; }
+#load-status { font-family: var(--f-data); font-size: 13px; color: var(--muted); min-height: 1.4em; margin: 0; }
+#load-error { font-family: var(--f-data); font-size: 12px; color: var(--alarm); white-space: pre-wrap; margin: 0; }
+
+/* menu */
+#menu { align-items: stretch; background: linear-gradient(90deg, rgba(7, 11, 16, 0.92) 0%, rgba(7, 11, 16, 0.72) 34%, rgba(7, 11, 16, 0) 62%); pointer-events: none; }
+#menu > * { pointer-events: auto; }
+.panel { width: min(440px, 100%); display: flex; flex-direction: column; gap: 18px; padding-block: 8px; }
+.ops-strip { font-family: var(--f-data); font-size: 11px; letter-spacing: 0.12em; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; text-transform: uppercase; }
+.ops-strip em { font-style: normal; color: var(--text); }
+form { display: grid; gap: 16px; }
+fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; min-width: 0; }
+legend, .lbl { font-family: var(--f-data); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); padding: 0; margin-bottom: 6px; }
+.scn { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.scn label { position: relative; display: grid; gap: 2px; padding: 10px 12px; background: var(--deck); border: 1px solid var(--rule); cursor: pointer; min-width: 0; }
+.scn label:hover { border-color: #47586a; }
+.scn input { position: absolute; opacity: 0; pointer-events: none; }
+.scn strong { font-family: var(--f-display); font-weight: 700; font-size: 20px; letter-spacing: 0.04em; line-height: 1; }
+.scn small { font-size: 11px; color: var(--muted); line-height: 1.35; }
+.scn label:has(input:checked) { border-color: var(--amber); background: #221c12; }
+.scn label:has(input:checked) strong { color: var(--amber); }
+.scn label:has(input:focus-visible) { outline: 2px solid var(--amber); outline-offset: 2px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.field { display: grid; gap: 4px; min-width: 0; }
+select, input[type=range] { width: 100%; font: 13px var(--f-body); color: var(--text); background: var(--deck); border: 1px solid var(--rule); padding: 7px 8px; border-radius: 0; }
+select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+input[type=range] { padding: 0; accent-color: var(--amber); height: 28px; background: transparent; border: 0; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+.check input { accent-color: var(--amber); width: 16px; height: 16px; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; }
+button { font-family: var(--f-display); font-weight: 900; letter-spacing: 0.08em; font-size: 22px; padding: 10px 22px; border: 1px solid var(--rule); background: var(--deck); color: var(--text); cursor: pointer; border-radius: 0; }
+button:hover { border-color: #5b6c7c; }
+button.primary { background: var(--amber); border-color: var(--amber); color: #1a1206; }
+button.primary:hover { background: #ffbb55; }
+button.small { font-size: 16px; padding: 8px 14px; }
+details { background: rgba(20, 27, 34, 0.85); border: 1px solid var(--rule); }
+summary { cursor: pointer; padding: 10px 12px; font-family: var(--f-data); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; padding: 4px 12px 14px; font-size: 12px; }
+.keys kbd { font-family: var(--f-data); font-size: 11px; color: var(--amber); white-space: nowrap; }
+.keys span { color: var(--text); min-width: 0; }
+.note { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.5; }
+.note.warn { color: var(--amber); }
+
+/* pause */
+#pause { align-items: center; justify-content: center; background: rgba(7, 11, 16, 0.78); }
+.pause-card { width: min(520px, 100%); display: grid; gap: 16px; background: var(--deck); border: 1px solid var(--rule); padding: 20px; }
+.pause-card h2 { font-family: var(--f-display); font-weight: 900; font-size: 44px; letter-spacing: 0.06em; margin: 0; line-height: 1; }
+.pause-card .row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* mission debrief */
+#debrief { align-items: center; justify-content: center; background: rgba(7, 11, 16, 0.72); }
+.debrief-card { width: min(560px, 100%); display: grid; gap: 14px; background: var(--deck); border: 1px solid var(--rule); border-top: 4px solid var(--datum); padding: 22px 22px 20px; }
+#debrief.fail .debrief-card { border-top-color: var(--alarm); }
+.db-kicker { font-family: var(--f-data); font-size: 12px; letter-spacing: 0.2em; color: var(--datum); margin: 0; }
+#debrief.fail .db-kicker { color: var(--alarm); }
+.debrief-card h2 { font-family: var(--f-display); font-weight: 900; font-size: clamp(30px, 6vw, 44px); letter-spacing: 0.04em; line-height: 0.95; margin: 0; text-wrap: balance; }
+.db-grade { margin: 0; font-size: 14px; color: var(--amber); line-height: 1.45; }
+#debrief.fail .db-grade { color: var(--muted); }
+.db-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.db-stats > div { background: var(--deck-2); border: 1px solid var(--rule); padding: 8px 10px; display: grid; gap: 2px; min-width: 0; }
+.db-stats b { font-family: var(--f-data); font-size: 20px; font-weight: 700; color: var(--text); }
+.db-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; font-size: 13px; color: var(--muted); }
+.db-list li { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.db-list li i { font-style: normal; color: var(--alarm); width: 12px; flex: none; }
+.db-list li.ok { color: var(--text); }
+.db-list li.ok i { color: var(--datum); }
+.db-list li.big { font-weight: 700; }
+@media (max-width: 520px) { .db-list { grid-template-columns: 1fr; } }
+
+/* in-game coach ("what to press now") + controls card */
+#coach, #keys-card { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); width: min(360px, calc(100vw - 32px)); background: rgba(7, 11, 16, 0.8); border: 1px solid var(--rule); color: var(--text); pointer-events: none; font-family: var(--f-body); }
+#coach { top: calc(6.4vh + 12px + env(safe-area-inset-top, 0px)); border-left: 3px solid var(--amber); padding: 10px 12px 12px; display: grid; gap: 8px; }
+.c-title { font-family: var(--f-display); font-weight: 700; font-size: 22px; letter-spacing: 0.04em; line-height: 1; color: var(--amber); }
+.c-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.c-steps li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; line-height: 1.4; color: var(--muted); min-width: 0; }
+.c-steps li > i { font-style: normal; flex: 0 0 12px; text-align: center; }
+.c-keys { display: inline-flex; gap: 3px; flex: none; }
+.c-keys:empty { display: none; }
+.c-txt { min-width: 0; }
+.c-steps li.now { color: #ffffff; }
+.c-steps li.now > i { color: var(--amber); }
+.c-steps li.done { color: #7d958a; }
+.c-steps li.done > i { color: var(--datum); }
+.c-steps li.opt .c-txt { font-style: italic; }
+#coach kbd, #keys-card kbd { font-family: var(--f-data); font-size: 11px; line-height: 1; padding: 3px 6px 3px; min-width: 2em; text-align: center; color: var(--text); background: #1f2a34; border: 1px solid #3b4a58; border-bottom-width: 2px; border-radius: 3px; display: inline-block; }
+.c-steps li.now kbd { color: #1a1206; background: var(--amber); border-color: #b97a1c; }
+.c-alert { font-size: 13px; font-weight: 700; padding: 6px 8px; line-height: 1.6; }
+.c-alert.danger { background: rgba(255, 91, 75, 0.22); border: 1px solid var(--alarm); color: #ffe1dc; }
+.c-alert.warn { background: rgba(243, 168, 58, 0.16); border: 1px solid var(--amber); color: #ffe9c9; }
+.c-tip { font-size: 12px; color: var(--muted); line-height: 1.45; }
+#keys-card { bottom: calc(7.3vh + 10px + env(safe-area-inset-bottom, 0px)); padding: 8px 12px 10px; font-size: 12px; }
+.kc-head { display: flex; justify-content: space-between; align-items: center; font-family: var(--f-data); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.kc-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; }
+.kc-grid dt { font-family: var(--f-data); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding-top: 5px; }
+.kc-grid dd { margin: 0; line-height: 1.95; min-width: 0; }
+.kc-mini { display: none; font-size: 12px; color: var(--muted); }
+#keys-card.collapsed { width: auto; padding: 6px 10px; }
+#keys-card.collapsed .kc-head, #keys-card.collapsed .kc-grid { display: none; }
+#keys-card.collapsed .kc-mini { display: block; }
+.lede { font-size: 14px; line-height: 1.5; color: var(--text); margin: 0; max-width: 40ch; }
+details.settings { background: transparent; }
+.pad { padding: 4px 12px 14px; }
+@media (max-height: 700px) { .c-tip { display: none; } .c-steps li { font-size: 12px; } }
+
+/* radio subtitles: sender, the radio call itself, and what it means */
+#radio { position: fixed; z-index: 2; left: calc(max(16px, env(safe-area-inset-left, 0px)) + min(360px, calc(100vw - 32px)) + 16px); right: 250px;
+  bottom: calc(7.3vh + 10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 6px; pointer-events: none; }
+.rc { width: min(640px, 100%); background: rgba(7, 11, 16, 0.82); border: 1px solid var(--rule); border-left: 3px solid var(--rc, var(--datum)); padding: 7px 12px 8px 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; row-gap: 3px; transition: opacity 0.2s linear; }
+.rc p { margin: 0; min-width: 0; }
+.rc-from { grid-row: span 2; font-family: var(--f-data); font-size: 11px; line-height: 1.75; letter-spacing: 0.12em; color: var(--rc, var(--datum)); white-space: nowrap; }
+.rc.live .rc-from::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; vertical-align: 1px; }
+.rc-line { font-family: var(--f-data); font-size: 13px; line-height: 1.45; color: #f2f6f8; }
+.rc-plain { font-size: 12px; line-height: 1.4; color: #aab8c2; }
+.rc-awacs { --rc: var(--datum); }
+.rc-ship, .rc-lso { --rc: var(--amber); }
+.rc-pilot { --rc: #9fd3ff; }
+.rc-wing { --rc: #9fffc8; }
+.rc-enemy { --rc: var(--alarm); }
+@media (max-width: 1100px) { #radio { left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); bottom: auto; top: calc(6.4vh + 12px + env(safe-area-inset-top, 0px)); align-items: flex-end; } .rc { width: min(460px, 100%); } }
+
+/* mission briefing: kneeboard card with the tactical map */
+#briefing { align-items: flex-start; justify-content: center; background: rgba(5, 8, 12, 0.86); }
+.bf-card { width: min(1120px, 100%); margin-block: auto; display: grid; gap: 14px; background: var(--deck); border: 1px solid var(--rule); border-top: 4px solid var(--amber); padding: 18px 20px 16px; }
+.bf-head { display: grid; gap: 4px; }
+.bf-kicker { font-family: var(--f-data); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--amber); margin: 0; }
+.bf-head h2 { font-family: var(--f-display); font-weight: 900; font-size: clamp(32px, 5vw, 50px); letter-spacing: 0.04em; line-height: 0.95; text-transform: uppercase; margin: 0; text-wrap: balance; }
+.bf-goal { margin: 0; font-size: 15px; line-height: 1.4; color: var(--text); }
+.bf-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: start; }
+.bf-map { margin: 0; display: grid; gap: 6px; justify-items: start; min-width: 0; }
+.bf-map canvas { display: block; max-width: 100%; border: 1px solid var(--rule); background: #0a1822; }
+.bf-legend { font-family: var(--f-data); font-size: 10px; letter-spacing: 0.04em; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; }
+.bf-legend i { font-style: normal; }
+.bf-legend .k-you { color: #7fd0ff; } .bf-legend .k-tgt { color: var(--amber); } .bf-legend .k-sam { color: #ff6a5a; } .bf-legend .k-route { color: var(--text); }
+.bf-text { min-width: 0; columns: 2 290px; column-gap: 28px; }
+.bf-sec { break-inside: avoid; margin-bottom: 16px; }
+.bf-sec h3 { font-family: var(--f-data); font-weight: 700; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+.bf-sec p { margin: 0; font-size: 13px; line-height: 1.5; max-width: 72ch; }
+.bf-tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.bf-tasks li { display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; row-gap: 1px; }
+.bf-tasks li > i { grid-row: span 2; font-style: normal; font-family: var(--f-data); font-weight: 700; font-size: 12px; color: #1a1206; background: var(--amber); width: 22px; height: 22px; display: grid; place-items: center; }
+.bf-tasks li.opt > i { background: transparent; color: var(--amber); border: 1px solid var(--amber); }
+.bf-tasks b { font-size: 13px; }
+.bf-tasks span { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.bf-text kbd { font-family: var(--f-data); font-size: 10px; line-height: 1; padding: 2px 5px; color: var(--text); background: #1f2a34; border: 1px solid #3b4a58; border-bottom-width: 2px; border-radius: 3px; display: inline-block; }
+.bf-threats { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.4; }
+.bf-threats th, .bf-threats td { text-align: left; padding: 5px 10px 5px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.bf-threats th { font-family: var(--f-data); font-weight: 700; font-size: 11px; color: #ffb3aa; white-space: nowrap; }
+.bf-threats td.r { font-family: var(--f-data); color: #ff8576; white-space: nowrap; }
+.bf-tips { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 12px; line-height: 1.5; }
+.bf-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; border-top: 1px solid var(--rule); padding-top: 12px; }
+.bf-facts { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; min-width: 0; flex: 1 1 520px; }
+.bf-facts div { display: grid; gap: 2px; min-width: 0; }
+.bf-facts dt { font-family: var(--f-data); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.bf-facts dd { margin: 0; font-family: var(--f-data); font-size: 12px; color: var(--text); }
+.bf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 860px) { .bf-body { grid-template-columns: minmax(0, 1fr); } .bf-card { padding: 14px; } }
+
+@media (max-width: 640px) {
+  #menu { background: rgba(7, 11, 16, 0.86); }
+  .scn, .grid2 { grid-template-columns: 1fr; }
+  .brand { font-size: clamp(48px, 16vw, 80px); }
+}
+@media (prefers-reduced-motion: reduce) { .bar > div { transition: none; } }
+</style>
+
+<div id="stage" aria-label="Simulator view"></div>
+
+<section id="loading" class="overlay" aria-live="polite">
+  <div class="load-card">
+    <div class="lens" aria-hidden="true"><i></i><i></i><b></b><i></i><i></i></div>
+    <h1 class="brand">AEGIS<br><span>SPEAR</span></h1>
+    <p class="tagline">Carrier strike · fleet defense · combined arms</p>
+    <div class="bar"><div id="load-bar"></div></div>
+    <p id="load-status">Starting…</p>
+    <p id="load-error" hidden></p>
+  </div>
+</section>
+
+<section id="menu" class="overlay" hidden>
+  <div class="panel">
+    <div class="lens" aria-hidden="true"><i></i><i></i><b></b><i></i><i></i></div>
+    <h1 class="brand">AEGIS<br><span>SPEAR</span></h1>
+    <p class="lede">Fly a navy fighter off an aircraft carrier. Pick a mission and press Play. While you fly, the box on the left tells you what to press next.</p>
+    <form id="menu-form" autocomplete="off">
+      <fieldset>
+        <legend>Mission</legend>
+        <div class="scn">
+          <label><input type="radio" name="scenario" value="carrier" checked><strong>Carrier takeoff</strong><small>Get launched off the ship, then fly the city strike. Best first mission.</small></label>
+          <label><input type="radio" name="scenario" value="air"><strong>Dogfight</strong><small>Start in the air and shoot down four enemy fighters.</small></label>
+          <label><input type="radio" name="scenario" value="strike"><strong>City strike</strong><small>Knock out the radars and AA guns around the city, then hit the command bunker with a bunker buster.</small></label>
+          <label><input type="radio" name="scenario" value="approach"><strong>Carrier landing</strong><small>Start behind the ship and land on the deck. The landing assist flies it with you; Enter = try again.</small></label>
+          <label><input type="radio" name="scenario" value="deck"><strong>Taxi to catapult</strong><small>Drive the parked jet onto the catapult yourself.</small></label>
+        </div>
+      </fieldset>
+      <div class="field"><label class="lbl" for="opt-loadout">Weapons</label>
+        <select id="opt-loadout"><option value="multirole">Mixed: air-to-air, anti-radar, bunker busters</option><option value="strike">City strike: 4 anti-radar missiles + bunker busters</option><option value="air">Air-to-air missiles only</option><option value="cas">Ground attack: laser bombs, Mavericks, big bomb</option></select></div>
+      <label class="check" for="opt-practice"><input type="checkbox" id="opt-practice"> Practice: enemy missiles can't hurt you</label>
+      <div class="actions">
+        <button type="button" id="launch" class="primary">PLAY</button>
+        <button type="button" id="btn-fullscreen" class="small">FULLSCREEN</button>
+      </div>
+      <p id="touch-note" class="note warn" hidden>This needs a keyboard. On a phone you can watch the live scene.</p>
+      <p id="fs-note" class="note" hidden>Fullscreen isn't available in this view.</p>
+      <details class="settings">
+        <summary>Settings</summary>
+        <div class="grid2 pad">
+          <div class="field"><label class="lbl" for="opt-time">Time of day</label>
+            <select id="opt-time"><option value="dawn">Dawn</option><option value="morning" selected>Morning</option><option value="noon">Noon</option><option value="dusk">Sunset</option><option value="night">Night</option></select></div>
+          <div class="field"><label class="lbl" for="opt-weather">Clouds</label>
+            <select id="opt-weather"><option value="clear">Clear</option><option value="scattered" selected>A few</option><option value="broken">Lots</option><option value="overcast">Overcast</option></select></div>
+          <div class="field"><label class="lbl" for="opt-quality">Graphics</label>
+            <select id="opt-quality"><option value="low">Low (faster)</option><option value="medium" selected>Medium</option><option value="high">High (prettier)</option></select></div>
+          <div class="field"><label class="lbl" for="opt-volume">Volume</label><input type="range" id="opt-volume" min="0" max="100" value="80"></div>
+          <label class="check" for="opt-realistic"><input type="checkbox" id="opt-realistic"> Realistic controls (expert): A/D only roll, no auto-level</label>
+        </div>
+      </details>
+    </form>
+    <details>
+      <summary>All controls</summary>
+      <div class="keys">
+        <kbd>W / S</kbd><span>Nose down / nose up (arrow keys work too)</span>
+        <kbd>A / D</kbd><span>Turn left / right: the jet banks and turns, and levels out when you let go. Add S for a tighter turn. (Realistic controls: A/D only roll.)</span>
+        <kbd>Q / E</kbd><span>Rudder; steers the nose wheel on the deck</span>
+        <kbd>Shift / Ctrl</kbd><span>Throttle up / down (also = and −). Stops at 80%; press Shift again for afterburner</span>
+        <kbd>F</kbd><span>On the deck: hook up to the catapult, then launch</span>
+        <kbd>G · H · B</kbd><span>Landing gear · tailhook · speed brake (wheel brakes on the deck)</span>
+        <kbd>Landing</kbd><span>Gear down near the ship and follow the green circle: behind the ship the landing assist takes over (speed, glide slope, lineup; not with Realistic controls). Landing practice: Enter = start the approach over</span>
+        <kbd>T</kbd><span>Lock the enemy nearest your nose — jets or ground targets — and get a weapon for it ready (T again = next)</span>
+        <kbd>Space</kbd><span>Fire / release (guided bombs: when the HUD says IN RANGE — no diving needed)</span>
+        <kbd>1 – 5</kbd><span>Pick a weapon yourself: 1 heat-seeker · 2 radar missile · 3 small guided bombs / Maverick · 4 bunker buster &amp; bombs · 5 anti-radar</span>
+        <kbd>C</kbd><span>Gun (hold)</span>
+        <kbd>O, then 1 – 5</kbd><span>Orders for your wingman Spear 1-2: 1 attack the target you locked or marked with T · 2 cover me · 3 hunt on your own · 4 rejoin on me · 5 go home to the ship</span>
+        <kbd>X</kbd><span>Countermeasures: chaff (fools radar missiles) + flares (fool heat-seekers). Best when the BREAK cue says NOW and the threat is beside you</span>
+        <kbd>Z</kbd><span>Chaff only</span>
+        <kbd>F1 · F2 · F3</kbd><span>Cockpit · outside view · weapon camera</span>
+        <kbd>M</kbd><span>Steer your guided missile yourself</span>
+        <kbd>V</kbd><span>Night vision / heat camera</span>
+        <kbd>L · right-drag</kbd><span>Look back · look around</span>
+        <kbd>K</kbd><span>Expert: switch off the G limiter (lets the jet stall)</span>
+        <kbd>P · Esc</kbd><span>Pause</span>
+        <kbd>Tab</kbd><span>Hide / show the controls card while flying</span>
+      </div>
+      <p class="note" style="padding: 0 12px 12px">Careful: Ctrl+W closes the browser tab. If you're holding W, slow down with − instead of Ctrl.</p>
+    </details>
+  </div>
+</section>
+
+<section id="pause" class="overlay" hidden>
+  <div class="pause-card">
+    <h2>PAUSED</h2>
+    <div class="row">
+      <button type="button" id="resume" class="primary small">RESUME</button>
+      <button type="button" id="restart" class="small">RESTART</button>
+      <button type="button" id="to-menu" class="small">MAIN MENU</button>
+      <button type="button" id="pause-brief" class="small">BRIEFING</button>
+    </div>
+    <p class="lbl">Jump to a mission</p>
+    <div class="row">
+      <button type="button" class="small" data-scn="carrier">TAKEOFF</button>
+      <button type="button" class="small" data-scn="air">DOGFIGHT</button>
+      <button type="button" class="small" data-scn="strike">CITY STRIKE</button>
+      <button type="button" class="small" data-scn="approach">LANDING</button>
+    </div>
+    <p class="note">While flying, the box on the left says what to press next, and the controls card sits bottom-left (Tab hides it).</p>
+  </div>
+</section>
+
+<section id="debrief" class="overlay" hidden aria-live="assertive">
+  <div class="debrief-card">
+    <p class="db-kicker" id="db-kicker">MISSION COMPLETE</p>
+    <h2 id="db-title">COMMAND BUNKER DESTROYED</h2>
+    <p class="db-grade" id="db-grade"></p>
+    <div class="db-stats">
+      <div><span class="lbl">Time</span><b id="db-time">0:00</b></div>
+      <div><span class="lbl">Targets hit</span><b id="db-kills">0</b></div>
+      <div><span class="lbl">Jet health</span><b id="db-hp">100%</b></div>
+    </div>
+    <ul class="db-list" id="db-list"></ul>
+    <div class="row">
+      <button type="button" id="db-continue" class="primary small">KEEP FLYING</button>
+      <button type="button" id="db-again" class="small">FLY AGAIN</button>
+      <button type="button" id="db-menu" class="small">MAIN MENU</button>
+    </div>
+  </div>
+</section>
+
+<section id="briefing" class="overlay" hidden aria-labelledby="bf-title">
+  <div class="bf-card">
+    <header class="bf-head">
+      <p class="bf-kicker" id="bf-kicker">Strike tasking</p>
+      <h2 id="bf-title">Operation</h2>
+      <p class="bf-goal" id="bf-goal"></p>
+    </header>
+    <div class="bf-body">
+      <figure class="bf-map" id="bf-figure">
+        <canvas id="bf-canvas" role="img" aria-label="Tactical map of the island: targets, enemy SAM ranges, fighter patrols, the carrier and your route"></canvas>
+        <figcaption class="bf-legend"><span class="k-you">▲ you / friendly</span><span class="k-tgt">◆ target</span><span class="k-sam">◯ enemy missile range</span><span class="k-route">┄ planned route</span><span>grid 10 km</span></figcaption>
+      </figure>
+      <div class="bf-text" id="bf-text"></div>
+    </div>
+    <footer class="bf-foot">
+      <dl class="bf-facts" id="bf-facts"></dl>
+      <div class="bf-actions">
+        <button type="button" id="bf-start" class="primary small">START MISSION</button>
+        <button type="button" id="bf-back" class="small">MAIN MENU</button>
+      </div>
+    </footer>
+  </div>
+</section>
+
+<aside id="radio" hidden aria-live="polite" aria-label="Radio"></aside>
+<aside id="coach" hidden aria-live="polite"></aside>
+<aside id="keys-card" hidden>
+  <div class="kc-head"><span>Controls</span><span><kbd>Tab</kbd> hide</span></div>
+  <dl class="kc-grid">
+    <dt>Fly</dt><dd><kbd>A</kbd><kbd>D</kbd> turn · <kbd>W</kbd><kbd>S</kbd> nose down / up · <kbd>Q</kbd><kbd>E</kbd> rudder</dd>
+    <dt>Speed</dt><dd><kbd>Shift</kbd> faster · <kbd>Ctrl</kbd> or <kbd>−</kbd> slower</dd>
+    <dt>Weapons</dt><dd><kbd>T</kbd> lock (air or ground) · <kbd>Space</kbd> fire · <kbd>1</kbd>–<kbd>5</kbd> choose · <kbd>C</kbd> gun</dd>
+    <dt>Defend</dt><dd><kbd>X</kbd> chaff + flares · follow the BREAK cue</dd>
+    <dt>Wingman</dt><dd><kbd>O</kbd> orders, then <kbd>1</kbd>–<kbd>5</kbd> (the menu lists them)</dd>
+    <dt>Jet</dt><dd><kbd>G</kbd> gear · <kbd>H</kbd> hook · <kbd>B</kbd> brake · <kbd>F</kbd> catapult</dd>
+    <dt>View</dt><dd><kbd>F1</kbd> cockpit · <kbd>F2</kbd> outside · <kbd>V</kbd> night/heat · <kbd>P</kbd> pause</dd>
+  </dl>
+  <div class="kc-mini"><kbd>Tab</kbd> show controls</div>
+</aside>

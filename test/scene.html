@@ -1,0 +1,86 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js"}}</script></head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { GU } from '/src/render/glsl.js';
+import { Pipeline } from '/src/render/pipeline.js';
+import { Sky } from '/src/render/sky.js';
+import { initCloudTextures } from '/src/render/clouds.js';
+import { Terrain } from '/src/world/terrain.js';
+import { Ocean } from '/src/world/ocean.js';
+import { buildCarrier, buildDestroyer, DECK_Y, CATS } from '/src/models/carrier.js';
+import { buildFighter } from '/src/models/fighter.js';
+import { buildEnemyFighter, buildMBT, buildSAMLauncher, buildSAMRadar } from '/src/models/units.js';
+import { buildMunition } from '/src/models/munitions.js';
+
+const params = new URLSearchParams(location.hash.slice(1));
+const W = innerWidth, H = innerHeight;
+const renderer = new THREE.WebGLRenderer({ antialias: false, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
+renderer.setSize(W, H); renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+const t0 = performance.now();
+initCloudTextures();
+const tCl = performance.now();
+const scene = new THREE.Scene();
+const fx = new THREE.Scene();
+const sky = new Sky(renderer);
+sky.setTime(parseFloat(params.get('h') || '9.5'));
+scene.add(sky.dome, sky.sunLight, sky.sunLight.target);
+const terrain = new Terrain();
+terrain.generate();
+const tTer = performance.now();
+terrain.build(renderer);
+scene.add(terrain.group);
+const ocean = new Ocean(terrain);
+ocean.setShoreTexture(terrain.nTex);
+scene.add(ocean.mesh);
+const carrier = buildCarrier();
+carrier.root.position.set(4000, 0, 26000);
+carrier.root.rotation.y = Math.PI / 2; // heading west (bow -Z rotated to -X)
+scene.add(carrier.root);
+const dd = buildDestroyer(); dd.root.position.set(4000 - 1500, 0, 26000 + 1800); dd.root.rotation.y = Math.PI / 2; scene.add(dd.root);
+const jet = buildFighter();
+scene.add(jet.root);
+// place jet on cat 1
+const cat = CATS[0];
+const local = new THREE.Vector3(cat.x, DECK_Y + 2.24, cat.z0 + 6.25 - 0.0);
+jet.root.position.copy(local.applyMatrix4(carrier.root.matrixWorld.clone().compose(carrier.root.position, carrier.root.quaternion, new THREE.Vector3(1,1,1))));
+jet.root.quaternion.copy(carrier.root.quaternion);
+// a missile on the wingtip
+const m9 = buildMunition('aim9x'); m9.root.position.set(6.38, -0.45, 2.2); jet.root.add(m9.root);
+const m9b = buildMunition('aim9x'); m9b.root.position.set(-6.38, -0.45, 2.2); jet.root.add(m9b.root);
+for (const [x,k] of [[4.7,'aim120'],[-4.7,'aim120'],[3.35,'agm65'],[-3.35,'agm65'],[2.1,'gbu12'],[-2.1,'mk84']]) { const m = buildMunition(k); m.root.position.set(x, -1.0, 0.7); jet.root.add(m.root); }
+const fl = buildEnemyFighter(); fl.root.position.set(-2000, 2600, 3000); scene.add(fl.root);
+const tank = buildMBT('red'); tank.root.position.set(8200, terrain.heightAt(8200, 1000), 1000); scene.add(tank.root);
+const sam = buildSAMLauncher(); sam.root.position.set(-900, terrain.heightAt(-900, -2700), -2700); sam.nodes.erector.rotation.x = -Math.PI/2; scene.add(sam.root);
+const rad = buildSAMRadar('search'); rad.root.position.set(-860, terrain.heightAt(-860, -2760), -2760); scene.add(rad.root);
+const camera = new THREE.PerspectiveCamera(parseFloat(params.get('fov') || '60'), W / H, 0.05, 200000);
+const cp = (params.get('cam') || '4100,60,26100').split(',').map(Number);
+const ct = (params.get('look') || '4000,20,26000').split(',').map(Number);
+camera.position.set(...cp); camera.lookAt(...ct);
+const pipe = new Pipeline(renderer, W, H, { quality: params.get('q') || 'medium' });
+scene.updateMatrixWorld(true);
+sky.update(camera.position, 0);
+const env = sky.updateEnv(); scene.environment = env;
+terrain.updateShadows(GU.uSunDir.value);
+if (params.get('jetcam')) { camera.position.copy(jet.root.localToWorld(new THREE.Vector3(...params.get('jetcam').split(',').map(Number)))); camera.lookAt(jet.root.localToWorld(new THREE.Vector3(0,0,-2))); }
+if (params.get('cockpit')) { jet.cockpit.group.visible = true; camera.position.copy(jet.root.localToWorld(new THREE.Vector3(0, 0.98, -4.9))); camera.quaternion.copy(jet.root.quaternion); }
+let frames = 0;
+function frame() {
+  GU.uTime.value = 12.0 + frames * 0.016;
+  terrain.updateLOD(camera);
+  ocean.update(camera.position, [{ pos: carrier.root.position, fwd: new THREE.Vector3(-1,0,0), speed: 13, length: 333, beam: 41, alive: true }, { pos: dd.root.position, fwd: new THREE.Vector3(-1,0,0), speed: 13, length: 155, beam: 20, alive: true }]);
+  sky.followCamera(camera, params.get('cockpit') || params.get('jetcam') ? jet.root.position : camera.position);
+  sky.update(camera.position, frames);
+  pipe.render(scene, fx, camera, { mode: 0, exposure: sky.exposure });
+  frames++;
+  window.__frames = frames;
+  if (frames < 3) requestAnimationFrame(frame);
+  else window.__done = { gen: Math.round(tTer - tCl), clouds: Math.round(tCl - t0), total: Math.round(performance.now() - t0), exposure: sky.exposure, sun: GU.uSunColor.value.toArray().map(v=>+v.toFixed(2)), amb: GU.uSkyAmb.value.toArray().map(v=>+v.toFixed(3)), info: renderer.info.render };
+}
+frame();
+</script></body></html>
