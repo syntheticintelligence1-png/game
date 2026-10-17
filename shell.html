@@ -237,7 +237,8 @@ details.settings { background: transparent; }
         </div>
       </fieldset>
       <div class="field"><label class="lbl" for="opt-loadout">Weapons</label>
-        <select id="opt-loadout"><option value="multirole">Mixed: air-to-air, anti-radar, bunker busters</option><option value="strike">City strike: 4 anti-radar missiles + bunker busters</option><option value="air">Air-to-air missiles only</option><option value="cas">Ground attack: laser bombs, Mavericks, big bomb</option></select></div>
+        <select id="opt-loadout"><option value="auto" selected>Automatic: the right weapons for the mission</option><option value="multirole">Mixed: air-to-air, anti-radar, bunker busters</option><option value="strike">City strike: anti-radar missiles, 8 small bombs, bunker busters</option><option value="air">Air-to-air missiles only</option><option value="cas">Ground attack: laser bombs, Mavericks, big bomb</option></select>
+        <p class="note">Whatever you pick, the city strike always carries bunker busters, also after rearming.</p></div>
       <label class="check" for="opt-practice"><input type="checkbox" id="opt-practice"> Practice: enemy missiles can't hurt you</label>
       <div class="actions">
         <button type="button" id="launch" class="primary">PLAY</button>

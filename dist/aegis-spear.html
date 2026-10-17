@@ -237,7 +237,8 @@ details.settings { background: transparent; }
         </div>
       </fieldset>
       <div class="field"><label class="lbl" for="opt-loadout">Weapons</label>
-        <select id="opt-loadout"><option value="multirole">Mixed: air-to-air, anti-radar, bunker busters</option><option value="strike">City strike: 4 anti-radar missiles + bunker busters</option><option value="air">Air-to-air missiles only</option><option value="cas">Ground attack: laser bombs, Mavericks, big bomb</option></select></div>
+        <select id="opt-loadout"><option value="auto" selected>Automatic: the right weapons for the mission</option><option value="multirole">Mixed: air-to-air, anti-radar, bunker busters</option><option value="strike">City strike: anti-radar missiles, 8 small bombs, bunker busters</option><option value="air">Air-to-air missiles only</option><option value="cas">Ground attack: laser bombs, Mavericks, big bomb</option></select>
+        <p class="note">Whatever you pick, the city strike always carries bunker busters, also after rearming.</p></div>
       <label class="check" for="opt-practice"><input type="checkbox" id="opt-practice"> Practice: enemy missiles can't hurt you</label>
       <div class="actions">
         <button type="button" id="launch" class="primary">PLAY</button>
@@ -8193,6 +8194,16 @@ var LOADOUTS = {
   air: { L1: "aim9x", R1: "aim9x", L2: "aim120", R2: "aim120", L3: "aim120", R3: "aim120", L4: "aim120", R4: "aim120", R6: "aim120" },
   cas: { L1: "aim9x", R1: "aim9x", L2: "agm65", R2: "agm65", L3: "agm65", R3: "agm65", L4: "gbu12", R4: "gbu12", C5: "mk84", R6: "aim120" }
 };
+function missionLoadout(pick2, kind) {
+  const L = pick2 !== "auto" && LOADOUTS[pick2];
+  if (kind === "strike") {
+    if (!L) return LOADOUTS.strike;
+    if (pick2 === "air") return LOADOUTS.multirole;
+    return Object.values(L).includes("gbu31") ? L : { ...L, L4: "gbu31", R4: "gbu31" };
+  }
+  if (kind === "dogfight" && !L) return LOADOUTS.air;
+  return L || LOADOUTS.multirole;
+}
 var PLAIN = { gbu39: "small guided bomb", aim9x: "heat-seeker", aim120: "radar missile", agm65: "guided missile", agm84: "anti-ship missile", agm88: "anti-radar missile", gbu12: "laser bomb", gbu31: "bunker buster", mk84: "big bomb", cbu: "cluster bomb" };
 var WEAPON_KEYS = { Digit1: ["aim9x"], Digit2: ["aim120"], Digit3: ["gbu39", "agm65", "agm84"], Digit4: ["gbu31", "gbu12", "mk84", "cbu"], Digit5: ["agm88"] };
 var GROUND_KINDS = /* @__PURE__ */ new Set(["ground", "sam", "structure", "ship"]);
@@ -8239,10 +8250,11 @@ var Player = class extends Entity {
     this.prevContacts = 0;
     this.applyLoadout(loadoutName);
   }
-  applyLoadout(name) {
+  // a LOADOUTS name or a station → weapon map (missionLoadout)
+  applyLoadout(load) {
     for (const s of this.stores) if (s.mesh) this.model.root.remove(s.mesh.root);
     this.stores = [];
-    const L = LOADOUTS[name] || LOADOUTS.multirole;
+    const L = typeof load === "object" ? load : LOADOUTS[load] || LOADOUTS.multirole;
     let mass = 0, drag = 0;
     for (const r of this.racks || []) this.model.root.remove(r);
     this.racks = [];
@@ -14042,7 +14054,7 @@ var Game = class {
       const fwdW = new THREE28.Vector3(LANDING.dir.x, 0, LANDING.dir.y).applyQuaternion(sh.quat).normalize();
       const hdg = Math.atan2(fwdW.x, -fwdW.z) / D2R12;
       const q = yawQ(hdg).multiply(new THREE28.Quaternion().setFromAxisAngle(new THREE28.Vector3(1, 0, 0), 5 * D2R12));
-      P.applyLoadout(P.loadoutName);
+      this.loadWeapons();
       const shipV = new THREE28.Vector3(Math.sin(sh.heading), 0, -Math.cos(sh.heading)).multiplyScalar(sh.speed);
       const air = shipV.clone().sub(this.wind), fa = fwdW.dot(air), Va = onSpeedTAS(ac, isa(p.y).rho);
       const closure = -fa + Math.sqrt(Math.max(0, fa * fa - air.lengthSq() + Va * Va));
@@ -14083,7 +14095,7 @@ var Game = class {
     if (name === "carrier") this.respawnOnCat();
     else {
       this.setupScenario(name);
-      P.applyLoadout(P.loadoutName);
+      this.loadWeapons();
     }
     P.root.visible = true;
     this.rig.setMode("chase");
@@ -14120,9 +14132,14 @@ var Game = class {
     this.msg(src === this.player ? "FRIENDLY FIRE — YOU HIT YOUR WINGMAN" : "YOUR WINGMAN SPEAR 1-2 WAS SHOT DOWN", 4, "#ff9080");
     this.comms.call("awacs", "Spear 1-2 is down, good chute. SAR is launching.", `Your wingman was shot down${by}. He ejected and a rescue helicopter is on the way. You fly alone from here.`, { pri: 5, ttl: 8, say: "Spear one-two is down, good chute. Search and rescue is launching." });
   }
+  // the menu's weapons pick, loaded the way the mission needs it
+  loadWeapons() {
+    const P = this.player;
+    P.applyLoadout(missionLoadout(P.loadoutName, this.mission && this.mission.kind));
+  }
   respawnOnCat() {
     const P = this.player;
-    P.applyLoadout(P.loadoutName);
+    this.loadWeapons();
     P.trails.smoke && P.trails.smoke.stop();
     P.trails.smoke = null;
     this.ops.release(P.ac);
@@ -14477,9 +14494,7 @@ var Game = class {
     if (o.hour != null && Math.abs(o.hour - this.sky.hours) > 0.01) this.setTime(o.hour);
     if (o.weather) this.setWeather(o.weather);
     for (const m of this.world.missiles.slice()) m.destroy("reset", true);
-    this.player.loadoutName = o.loadout || "multirole";
-    if (this.player.loadoutName === "air" && o.scenario !== "air" && o.scenario !== "approach") this.player.loadoutName = "multirole";
-    this.player.applyLoadout(this.player.loadoutName);
+    this.player.loadoutName = o.loadout || "auto";
     this.player.hp = 100;
     this.player.trails.smoke && this.player.trails.smoke.stop();
     this.player.trails.smoke = null;
@@ -14487,6 +14502,7 @@ var Game = class {
     this.kills = 0;
     this.comms.clear();
     this.mission.begin(o.scenario || "carrier");
+    this.loadWeapons();
     this.setupScenario(o.scenario || "carrier");
     this.spawnWingman(o.scenario || "carrier");
   }
@@ -16433,6 +16449,7 @@ function writeForm(s) {
 }
 async function boot() {
   const saved = store.get();
+  if (saved.weaponsV !== 2) delete saved.loadout;
   writeForm(saved);
   if (matchMedia("(pointer: coarse)").matches && innerWidth < 900) $("touch-note").hidden = false;
   const s = readForm();
@@ -16492,7 +16509,7 @@ async function boot() {
   const launch = () => {
     if ($("menu").hidden) return;
     const o = readForm();
-    store.set(o);
+    store.set({ ...o, weaponsV: 2 });
     game.audio.init().then(() => {
       game.audio.setMasterVolume(o.volume);
       game.audio.setPaused(!!game.paused);

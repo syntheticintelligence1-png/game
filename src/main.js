@@ -29,6 +29,8 @@ function writeForm(s) {
 
 async function boot() {
   const saved = store.get();
+  // a weapons pick saved before Automatic existed starts over on Automatic
+  if (saved.weaponsV !== 2) delete saved.loadout;
   writeForm(saved);
   // phones: the sim needs a keyboard; still show the live scene
   if (matchMedia('(pointer: coarse)').matches && innerWidth < 900) $('touch-note').hidden = false;
@@ -73,7 +75,7 @@ async function boot() {
   };
   const launch = () => {
     if ($('menu').hidden) return;
-    const o = readForm(); store.set(o);
+    const o = readForm(); store.set({ ...o, weaponsV: 2 });
     game.audio.init().then(() => { game.audio.setMasterVolume(o.volume); game.audio.setPaused(!!game.paused); game.audio.uiConfirm(); }).catch(() => {});
     $('menu').hidden = true; $('pause').hidden = true;
     try { startMission({ ...o, hour: HOURS[o.time] }, true); } catch (err) { console.error('launch failed', err); $('menu').hidden = false; }

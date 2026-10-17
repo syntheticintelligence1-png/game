@@ -11,7 +11,7 @@ import { buildBuildingGeometry, buildTreeGeometry, buildEnemyFighter, buildTruck
 import { JET_GEOM } from '../models/fighter.js';
 import { Ship, makeSurfaceQuery, CarrierOps } from '../sim/carrierOps.js';
 import { World, Entity, tagOf } from './world.js';
-import { Player } from './player.js';
+import { Player, missionLoadout } from './player.js';
 import { AIJet, SamSite, PointDefense, Flak, Tank, groundEntity, ShipDefense } from './ai.js';
 import { Helo } from './helo.js';
 import { Wingman, ORDERS } from './wingman.js';
@@ -318,7 +318,7 @@ export class Game {
       const fwdW = new THREE.Vector3(LANDING.dir.x, 0, LANDING.dir.y).applyQuaternion(sh.quat).normalize();
       const hdg = Math.atan2(fwdW.x, -fwdW.z) / D2R;
       const q = yawQ(hdg).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 5 * D2R));
-      P.applyLoadout(P.loadoutName);
+      this.loadWeapons();
       // start on speed (on-speed angle of attack) and on the glide slope. sh.vel is still zero before the ship's first
       // update, so take the ship's velocity from its heading and speed
       const shipV = new THREE.Vector3(Math.sin(sh.heading), 0, -Math.cos(sh.heading)).multiplyScalar(sh.speed);
@@ -345,7 +345,7 @@ export class Game {
     const P = this.player; this.respawnT = 0;
     if (P.wreck) { if (P.wreck.fire) P.wreck.fire.life = 0; if (P.wreck.trail) P.wreck.trail.stop(); P.wreck = null; }
     const name = this.scenario === 'deck' ? 'carrier' : this.scenario;
-    if (name === 'carrier') this.respawnOnCat(); else { this.setupScenario(name); P.applyLoadout(P.loadoutName); }
+    if (name === 'carrier') this.respawnOnCat(); else { this.setupScenario(name); this.loadWeapons(); }
     P.root.visible = true; this.rig.setMode('chase');
     this.msg('PRACTICE: RESPAWNED — KEEP GOING', 2.5, '#b0ffb0');
     // practice: a lost wingman comes back too; one still flying rejoins at the start point (unless he's busy)
@@ -374,8 +374,10 @@ export class Game {
     this.msg(src === this.player ? 'FRIENDLY FIRE — YOU HIT YOUR WINGMAN' : 'YOUR WINGMAN SPEAR 1-2 WAS SHOT DOWN', 4, '#ff9080');
     this.comms.call('awacs', 'Spear 1-2 is down, good chute. SAR is launching.', `Your wingman was shot down${by}. He ejected and a rescue helicopter is on the way. You fly alone from here.`, { pri: 5, ttl: 8, say: 'Spear one-two is down, good chute. Search and rescue is launching.' });
   }
+  // the menu's weapons pick, loaded the way the mission needs it
+  loadWeapons() { const P = this.player; P.applyLoadout(missionLoadout(P.loadoutName, this.mission && this.mission.kind)); }
   respawnOnCat() {
-    const P = this.player; P.applyLoadout(P.loadoutName); P.trails.smoke && P.trails.smoke.stop(); P.trails.smoke = null;
+    const P = this.player; this.loadWeapons(); P.trails.smoke && P.trails.smoke.stop(); P.trails.smoke = null;
     this.ops.release(P.ac); this.ops.trap = null; this.setupScenario('carrier');
     this.msg('REARMED AND REFUELED — BACK ON THE CATAPULT', 3);
   }
@@ -597,14 +599,12 @@ export class Game {
     if (o.hour != null && Math.abs(o.hour - this.sky.hours) > 0.01) this.setTime(o.hour);
     if (o.weather) this.setWeather(o.weather);
     for (const m of this.world.missiles.slice()) m.destroy('reset', true);
-    this.player.loadoutName = o.loadout || 'multirole';
-    // the strike missions need bunker busters: an air-to-air-only pick gets the mixed load instead
-    if (this.player.loadoutName === 'air' && o.scenario !== 'air' && o.scenario !== 'approach') this.player.loadoutName = 'multirole';
-    this.player.applyLoadout(this.player.loadoutName);
+    this.player.loadoutName = o.loadout || 'auto';
     this.player.hp = 100; this.player.trails.smoke && this.player.trails.smoke.stop(); this.player.trails.smoke = null;
     this.bingoCalled = false; this.kills = 0;
     this.comms.clear();
     this.mission.begin(o.scenario || 'carrier');
+    this.loadWeapons();
     this.setupScenario(o.scenario || 'carrier');
     this.spawnWingman(o.scenario || 'carrier');
   }

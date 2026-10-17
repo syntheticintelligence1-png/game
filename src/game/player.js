@@ -20,6 +20,19 @@ export const LOADOUTS = {
   air: { L1: 'aim9x', R1: 'aim9x', L2: 'aim120', R2: 'aim120', L3: 'aim120', R3: 'aim120', L4: 'aim120', R4: 'aim120', R6: 'aim120' },
   cas: { L1: 'aim9x', R1: 'aim9x', L2: 'agm65', R2: 'agm65', L3: 'agm65', R3: 'agm65', L4: 'gbu12', R4: 'gbu12', C5: 'mk84', R6: 'aim120' },
 };
+// What the jet is loaded with for a mission (mission.kind). 'auto', the menu default, is the mission's own load. Any
+// pick flies the city strike with bunker busters, as nothing else hurts the bunker: air-to-air only becomes the mixed
+// load, and a load without them gets two on the inboard pylons.
+export function missionLoadout(pick, kind) {
+  const L = pick !== 'auto' && LOADOUTS[pick];
+  if (kind === 'strike') {
+    if (!L) return LOADOUTS.strike;
+    if (pick === 'air') return LOADOUTS.multirole;
+    return Object.values(L).includes('gbu31') ? L : { ...L, L4: 'gbu31', R4: 'gbu31' };
+  }
+  if (kind === 'dogfight' && !L) return LOADOUTS.air;
+  return L || LOADOUTS.multirole;
+}
 const PLAIN = { gbu39: 'small guided bomb', aim9x: 'heat-seeker', aim120: 'radar missile', agm65: 'guided missile', agm84: 'anti-ship missile', agm88: 'anti-radar missile', gbu12: 'laser bomb', gbu31: 'bunker buster', mk84: 'big bomb', cbu: 'cluster bomb' };
 const WEAPON_KEYS = { Digit1: ['aim9x'], Digit2: ['aim120'], Digit3: ['gbu39', 'agm65', 'agm84'], Digit4: ['gbu31', 'gbu12', 'mk84', 'cbu'], Digit5: ['agm88'] };
 const GROUND_KINDS = new Set(['ground', 'sam', 'structure', 'ship']);
@@ -46,10 +59,11 @@ export class Player extends Entity {
     this.applyLoadout(loadoutName);
   }
 
-  applyLoadout(name) {
+  // a LOADOUTS name or a station → weapon map (missionLoadout)
+  applyLoadout(load) {
     for (const s of this.stores) if (s.mesh) this.model.root.remove(s.mesh.root);
     this.stores = [];
-    const L = LOADOUTS[name] || LOADOUTS.multirole;
+    const L = typeof load === 'object' ? load : LOADOUTS[load] || LOADOUTS.multirole;
     let mass = 0, drag = 0;
     for (const r of this.racks || []) this.model.root.remove(r);
     this.racks = [];

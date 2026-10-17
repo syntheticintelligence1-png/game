@@ -28,6 +28,8 @@ Web Audio, everything procedural (no asset files). Plain JS ES modules, bundled 
 - `node test/aim.mjs [tap,hold,track] [realistic]`: the easy controls: what a key tap and a key hold do to the nose,
   and two keyboard "pilots" keeping the gun cross on a target. The track part varies from run to run (random buffet
   and wing drop in flight.js); compare a few runs, not one.
+- `node test/loadout.mjs`: the weapons for every menu pick on every mission, the bunker busters a city strike always
+  carries (also after F on the deck rearms the jet), and catapult shots with the strike load. Quick.
 - `node test/glsl_check.mjs`: shader validation (needs glslangValidator). "'average' : function name is redeclaration"
   is a known false positive.
 - Real-browser screenshots: `node test/browser.mjs strike 10` and `node test/visual.mjs night` (Playwright + Chromium
@@ -47,7 +49,12 @@ Web Audio, everything procedural (no asset files). Plain JS ES modules, bundled 
 - `src/game/game.js`: main controller (world setup, fixed-step physics at 120 Hz, input, HUD state, deaths/crashes, autopilot while steering a missile)
 - `src/game/mission.js`: City strike (radars/SAMs/AA → bunker) and dogfight; owns its spawned targets, debrief report
 - `src/game/radio.js`: radio calls (MAGIC = AWACS, MOTHER = carrier, PADDLES = LSO) with brevity + plain-English lines
-- `src/game/player.js`: loadouts, weapons, T designation (air + ground), stand-off bomb release logic
+- `src/game/player.js`: loadouts, weapons, T designation (air + ground), stand-off bomb release logic. `missionLoadout`
+  turns the menu's Weapons pick into the load for the mission. The default pick, Automatic, gives the city strike the
+  strike load and the dogfight the air-to-air load (landing practice: the mixed load). Any pick flies the city strike
+  with 2 bunker busters: air-to-air only becomes the mixed load, and Ground attack gets them in place of its laser
+  bombs. game.js `loadWeapons()` loads it at launch, at the F rearm on the deck and at practice respawns. A weapons
+  pick saved before Automatic existed (no `weaponsV: 2` in the saved settings) starts over on Automatic.
 - `src/game/ai.js`: AI jets for either side (team 'red' or 'blue'), SA-21 / SA-15 / AA guns, ship defenses (enemy ships and, with team 'blue', our escorts)
 - `src/game/wingman.js`: the wingman Spear 1-2 (see below)
 - `src/game/helo.js`: helicopters circling the carrier group (scenery only); the model is `buildHelo()` in src/models/units.js
