@@ -5,7 +5,8 @@
 //  4. particles / trails / flames -> hdrRT (soft depth test against scene depth)
 //  5. distortion (shockwaves) -> distRT
 //  6. bloom (Karis-filtered down chain + tent up chain)
-//  7. final: exposure, ACES, G-LOC grey/black/red-out, vignette, sensor modes (TV/FLIR/NVG), grain
+//  6b. sun shafts: quarter-res mask of the sun glow the clouds and terrain leave visible, blurred radially (2 passes)
+//  7. final: exposure, ACES, colour grade, lens flare, G-LOC grey/black/red-out, vignette, sensor modes, grain
 import * as THREE from 'three';
 import { GU, GLSL_COMMON, GLSL_ACES, FULLSCREEN_VS, fullscreenTriangle } from './glsl.js';
 import { makeCloudMaterial } from './clouds.js';
@@ -20,6 +21,7 @@ export class Pipeline {
     this.quality = opts.quality || 'medium';
     this.cloudSteps = { low: 28, medium: 44, high: 64 }[this.quality] || 44;
     this.scale = opts.scale || 1;
+    this.flare = opts.flare !== false;
     this.frame = 0;
     this.quadScene = new THREE.Scene();
     this.quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -112,12 +114,57 @@ export class Pipeline {
       blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: true,
     });
 
+    // rgb: sun glow where open sky shows (through cloud transmittance); a: open sky, for the flare's sun visibility
+    this.shaftMaskMat = new THREE.ShaderMaterial({
+      uniforms: {
+        ...pick(['uSunDir', 'uSunColor']),
+        uDepth: { value: null }, uClouds: { value: null }, uCloudOn: { value: 1 },
+        uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() },
+      },
+      vertexShader: FULLSCREEN_VS,
+      fragmentShader: /* glsl */`
+        uniform vec3 uSunDir; uniform vec3 uSunColor;
+        uniform sampler2D uDepth; uniform sampler2D uClouds; uniform float uCloudOn;
+        uniform mat4 uInvProj; uniform mat4 uCamWorld;
+        varying vec2 vUv;
+        void main() {
+          float sky = texture(uDepth, vUv).r < 0.999999 ? 0.0 : 1.0;
+          float T = uCloudOn > 0.5 ? texture(uClouds, vUv).a : 1.0;
+          vec4 vr = uInvProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+          vec3 rd = normalize(mat3(uCamWorld) * normalize(vr.xyz / vr.w));
+          float mu = max(dot(rd, uSunDir), 0.0);
+          float glow = pow(mu, 900.0) * 4.0 + pow(mu, 60.0) * 0.4 + pow(mu, 8.0) * 0.05;
+          float v = sky * T;
+          gl_FragColor = vec4(uSunColor * v * glow * smoothstep(-0.02, 0.03, rd.y), v);
+        }`,
+      depthTest: false, depthWrite: false,
+    });
+    this.shaftBlurMat = new THREE.ShaderMaterial({
+      uniforms: { uSrc: { value: null }, uSun: { value: new THREE.Vector2() }, uLen: { value: 1 }, uDecay: { value: 0.97 }, uTime: GU.uTime },
+      vertexShader: FULLSCREEN_VS,
+      fragmentShader: /* glsl */`
+        uniform sampler2D uSrc; uniform vec2 uSun; uniform float uLen; uniform float uDecay; uniform float uTime;
+        varying vec2 vUv;
+        float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+        #define N 28
+        void main() {
+          vec2 st = (uSun - vUv) * uLen / float(N);
+          vec2 p = vUv + st * h12(gl_FragCoord.xy + fract(uTime * 3.7) * 61.0);
+          vec3 acc = vec3(0.0); float w = 1.0, ws = 0.0;
+          for (int i = 0; i < N; i++) { acc += texture(uSrc, p).rgb * w; ws += w; w *= uDecay; p += st; }
+          gl_FragColor = vec4(acc / ws, 1.0);
+        }`,
+      depthTest: false, depthWrite: false,
+    });
+
     this.finalMat = new THREE.ShaderMaterial({
       uniforms: {
         uHDR: { value: null }, uBloom: { value: null }, uDist: { value: null }, uExposure: { value: 0.35 }, uBloomStr: { value: 0.045 },
         uGrey: { value: 0 }, uRed: { value: 0 }, uMode: { value: 0 }, uTime: GU.uTime, uRes: { value: new THREE.Vector2(1, 1) },
         uFlash: { value: 0 }, uDamage: { value: 0 }, uNoise: { value: 0 }, uDegrade: { value: 0 }, uVignette: { value: 0.28 },
         uHurt: { value: 0 }, uFade: { value: 0 }, uInCloud: { value: 0 },
+        uShafts: { value: null }, uShaftMask: { value: null }, uShaftStr: { value: 0 }, uSunUV: { value: new THREE.Vector2(0.5, 0.5) },
+        uSunK: { value: 0 }, uSunTint: { value: new THREE.Vector3(1, 1, 1) }, uFlareStr: { value: 1 }, uCA: { value: 0.0032 },
       },
       vertexShader: FULLSCREEN_VS,
       fragmentShader: /* glsl */`
@@ -127,8 +174,34 @@ export class Pipeline {
         uniform float uExposure; uniform float uBloomStr; uniform float uGrey; uniform float uRed; uniform float uMode;
         uniform float uTime; uniform vec2 uRes; uniform float uFlash; uniform float uDamage; uniform float uNoise; uniform float uDegrade;
         uniform float uVignette; uniform float uHurt; uniform float uFade; uniform float uInCloud;
+        uniform sampler2D uShafts; uniform sampler2D uShaftMask; uniform float uShaftStr; uniform vec2 uSunUV; uniform float uSunK;
+        uniform vec3 uSunTint; uniform float uFlareStr; uniform float uCA;
         varying vec2 vUv;
         float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+        float ghost(vec2 p, vec2 c, float r) { float d = length(p - c); return smoothstep(r, r * 0.7, d) * (0.55 + 0.45 * smoothstep(r * 0.2, r * 0.85, d)); }
+        // camera-lens flare off the sun: ghosts mirrored through the middle of the screen, a halo, a streak and a starburst
+        vec3 lensFlare(vec2 uv) {
+          vec2 tx = vec2(0.008, 0.012);
+          float vis = texture(uShaftMask, uSunUV).a * 0.36
+            + (texture(uShaftMask, uSunUV + vec2(tx.x, 0.0)).a + texture(uShaftMask, uSunUV - vec2(tx.x, 0.0)).a
+             + texture(uShaftMask, uSunUV + vec2(0.0, tx.y)).a + texture(uShaftMask, uSunUV - vec2(0.0, tx.y)).a) * 0.16;
+          vis *= uSunK;
+          if (vis < 0.002) return vec3(0.0);
+          vec2 A = vec2(uRes.x / uRes.y, 1.0);
+          vec2 p = (uv - 0.5) * A, s = (uSunUV - 0.5) * A;
+          vec3 f = vec3(0.0);
+          f += ghost(p, -s * 0.30, 0.025) * vec3(0.55, 0.65, 1.0) * 0.21;
+          f += ghost(p, -s * 0.62, 0.065) * vec3(0.35, 0.9, 0.55) * 0.09;
+          f += ghost(p, -s * 1.05, 0.11) * vec3(1.0, 0.55, 0.3) * 0.055;
+          f += ghost(p, -s * 1.45, 0.045) * vec3(0.6, 0.5, 1.0) * 0.12;
+          f += ghost(p, s * 0.42, 0.035) * vec3(1.0, 0.85, 0.55) * 0.09;
+          vec2 q = p - s; float d = length(q);
+          f += smoothstep(0.035, 0.0, abs(d - 0.32)) * vec3(0.9, 0.7, 1.0) * 0.025;
+          f += exp(-abs(q.y) * 260.0) * exp(-abs(q.x) * 2.2) * vec3(0.55, 0.7, 1.0) * 0.14;
+          f += pow(abs(cos(atan(q.y, q.x) * 3.0 + 0.3)), 60.0) * exp(-d * 9.0) * 0.11;
+          f += exp(-d * 7.0) * 0.05 + exp(-d * 28.0) * 0.15;
+          return f * uSunTint * vis * uFlareStr;
+        }
         void main() {
           vec2 uv = vUv;
           vec2 dist = texture(uDist, uv).rg;
@@ -147,10 +220,19 @@ export class Pipeline {
           vec3 col;
           float n = h12(gl_FragCoord.xy + fract(uTime * 7.31) * 513.0);
           if (mode < 0.5) {
+            // a little lateral chromatic aberration toward the edges of the screen
+            vec2 cav = (uv - 0.5) * uCA;
+            hdr.r = texture(uHDR, uv + cav).r; hdr.b = texture(uHDR, uv - cav).b;
             vec3 c = mix(hdr, bloom, uBloomStr) + bloom * uBloomStr * 0.6;
+            if (uShaftStr > 0.0) c += texture(uShafts, vUv).rgb * uShaftStr;
             c *= uExposure;
             c += uFlash * vec3(1.0, 0.95, 0.9);
             col = ACESFitted(c);
+            // grade: a touch more saturation, cool shadows, warm highlights
+            float gl = dot(col, vec3(0.2126, 0.7152, 0.0722));
+            col = max(mix(vec3(gl), col, 1.08), 0.0);
+            col *= mix(vec3(0.96, 0.99, 1.06), vec3(1.035, 1.0, 0.955), smoothstep(0.0, 0.55, gl));
+            if (uSunK > 0.0) col += lensFlare(vUv);
             // in-cloud whiteout / condensation on canopy
             col = mix(col, vec3(dot(col, vec3(0.33))) * 1.05, uInCloud * 0.35);
             // G-LOC: desaturate, tunnel vision, blackout
@@ -214,7 +296,7 @@ export class Pipeline {
   setSize(w, h) {
     this.w = Math.max(2, Math.floor(w * this.scale)); this.h = Math.max(2, Math.floor(h * this.scale));
     const W = this.w, H = this.h;
-    for (const rt of [this.sceneRT, this.cloudRT, this.hdrRT, this.distRT, ...(this.bloomRTs || [])]) if (rt) rt.dispose();
+    for (const rt of [this.sceneRT, this.cloudRT, this.hdrRT, this.distRT, ...(this.bloomRTs || []), ...(this.shaftRTs || [])]) if (rt) rt.dispose();
     const depthTex = new THREE.DepthTexture(W, H, THREE.FloatType);
     depthTex.minFilter = THREE.NearestFilter; depthTex.magFilter = THREE.NearestFilter;
     this.sceneRT = this.makeRT(W, H, { depthBuffer: true, depthTexture: depthTex });
@@ -225,6 +307,7 @@ export class Pipeline {
     this.bloomRTs = [];
     let bw = W / 2, bh = H / 2;
     for (let i = 0; i < 6; i++) { this.bloomRTs.push(this.makeRT(bw, bh)); bw /= 2; bh /= 2; }
+    this.shaftRTs = this.flare ? [0, 1, 2].map(() => this.makeRT(W / 4, H / 4)) : [];
     this.finalMat.uniforms.uRes.value.set(W, H);
     this.depthTexture = depthTex;
   }
@@ -288,8 +371,24 @@ export class Pipeline {
       bu.uSrc.value = s.texture; bu.uTexel.value.set(1 / s.width, 1 / s.height);
       this.pass(this.bloomUpMat, dst);
     }
-    // 7. final
+    // 6b. sun shafts and the flare's view of the sun
     const fu = this.finalMat.uniforms;
+    const sun = this.flare && !fx.mode && !fx.underwater ? this.sunScreen(camera) : null;
+    if (sun && sun.k > 0.001) {
+      const mu = this.shaftMaskMat.uniforms, S = this.shaftRTs;
+      mu.uDepth.value = this.depthTexture; mu.uClouds.value = this.cloudRT.texture; mu.uCloudOn.value = cloudsOn ? 1 : 0;
+      mu.uInvProj.value.copy(invProj); mu.uCamWorld.value.copy(camWorld);
+      this.pass(this.shaftMaskMat, S[0]);
+      // long jittered steps all the way to the sun, then a short pass that fills the gaps between them
+      const b = this.shaftBlurMat.uniforms; b.uSun.value.set(sun.x, sun.y);
+      b.uSrc.value = S[0].texture; b.uLen.value = 1; b.uDecay.value = 0.965; this.pass(this.shaftBlurMat, S[1]);
+      b.uSrc.value = S[1].texture; b.uLen.value = 1 / 26; b.uDecay.value = 1; this.pass(this.shaftBlurMat, S[2]);
+      fu.uShafts.value = S[2].texture; fu.uShaftMask.value = S[0].texture; fu.uSunUV.value.set(sun.x, sun.y);
+      fu.uShaftStr.value = (fx.shafts != null ? fx.shafts : 0.035) * sun.k; fu.uSunK.value = sun.k;
+      const sc = GU.uSunColor.value; fu.uSunTint.value.set(sc.x, sc.y, sc.z).multiplyScalar(1 / 18);
+      fu.uFlareStr.value = fx.flare != null ? fx.flare : 1;
+    } else { fu.uShaftStr.value = 0; fu.uSunK.value = 0; }
+    // 7. final
     fu.uHDR.value = this.hdrRT.texture; fu.uBloom.value = this.bloomRTs[0].texture; fu.uDist.value = this.distRT.texture;
     fu.uExposure.value = fx.exposure; fu.uGrey.value = fx.grey || 0; fu.uRed.value = fx.red || 0; fu.uMode.value = fx.mode || 0;
     fu.uFlash.value = fx.flash || 0; fu.uNoise.value = fx.noise || 0; fu.uDegrade.value = fx.degrade || 0;
@@ -298,6 +397,18 @@ export class Pipeline {
     if (fx.target !== undefined) this.pass(this.finalMat, fx.target); else this.pass(this.finalMat, null);
     r.setRenderTarget(null);
   }
+
+  // where the sun sits on screen (uv) and how much it counts: k fades as it slides off screen, goes behind the
+  // camera or sets
+  sunScreen(camera) {
+    const sd = GU.uSunDir.value;
+    const facing = camera.getWorldDirection(_fwd).dot(sd);
+    if (facing < 0.05 || sd.y < -0.03) return { x: 0.5, y: 0.5, k: 0 };
+    _sp.copy(sd).multiplyScalar(1e4).add(camera.position).project(camera);
+    const off = Math.max(Math.abs(_sp.x), Math.abs(_sp.y)), S = THREE.MathUtils.smoothstep;
+    return { x: _sp.x * 0.5 + 0.5, y: _sp.y * 0.5 + 0.5, k: S(facing, 0.05, 0.3) * (1 - S(off, 1.0, 1.8)) * S(sd.y, -0.03, 0.05) };
+  }
 }
+const _fwd = new THREE.Vector3(), _sp = new THREE.Vector3();
 
 function pick(names) { const o = {}; for (const n of names) o[n] = GU[n]; return o; }

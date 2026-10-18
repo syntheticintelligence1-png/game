@@ -383,6 +383,11 @@ export class AudioEngine {
       const lg = this.gain(0.5); const dc = c.createConstantSource(); dc.offset.value = 0.5; lfo.connect(lg); lg.connect(am.gain); dc.connect(am.gain); lfo.start(); dc.start();
       n1.connect(bp); bp.connect(am); am.connect(lp); src.lfo = lfo; src.dc = dc;
     } else if (kind === 'ship' || kind === 'prop') { n1 = this.loop(this.noise.brown, 0.5); n1.connect(lp); o1 = c.createOscillator(); o1.type = 'triangle'; o1.frequency.value = kind === 'prop' ? 95 : 42; const og = this.gain(0.2); o1.connect(og); og.connect(lp); o1.start(); src.o1base = o1.frequency.value; }
+    else if (kind === 'drone') {
+      // small two-stroke pusher: a nasal sawtooth buzz over a little rumble (the moped sound of a one-way attack drone)
+      n1 = this.loop(this.noise.brown, 0.5); n1.connect(lp); o1 = c.createOscillator(); o1.type = 'sawtooth'; o1.frequency.value = 118;
+      const bp = this.filt('bandpass', 640, 1.2); const og = this.gain(0.34); o1.connect(bp); bp.connect(og); og.connect(lp); o1.start(); src.o1base = 118;
+    }
     src.n1 = n1; src.n2 = n2; src.o1 = o1;
     this.sources.add(src);
     src.update = (pos, vel, params = {}) => {

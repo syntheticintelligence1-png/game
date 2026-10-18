@@ -124,10 +124,13 @@ export class Wingman extends AIJet {
   creditKill(e) {
     const g = this.game; this.kills++;
     g.msg(`YOUR WINGMAN ${e.kind === 'air' ? 'SHOT DOWN' : e.kind === 'ship' ? 'SANK' : 'DESTROYED'} ${tagOf(e)}`, 3, '#b0ffb0');
-    if (e.kind === 'air') {
+    if (e.isDrone) {
+      this.say(e.type === 'cruise' ? 'splash the vampire!' : 'splash the drone!', `Your wingman shot down ${e.type === 'cruise' ? 'an anti-ship missile' : e.type === 'recon' ? 'the enemy spy drone' : 'an attack drone'}.`, { key: 'w-dkill', every: 4, pri: 2, ttl: 5 });
+    } else if (e.kind === 'air') {
       this.say('splash one!', `Your wingman shot down ${e.name}.`, { pri: 3, ttl: 5 });
-      const left = g.aiJets.filter(j => j.alive && j.team === 'red').length;
-      g.comms.call('awacs', left ? `Magic copies, splash one. ${title(NUMW[left] || String(left))} bandit${left > 1 ? 's' : ''} remaining.` : 'Magic copies, splash. Picture clean.', left ? `${left} enemy fighter${left > 1 ? 's' : ''} left.` : 'The sky is clear of enemy fighters.', { pri: 2, ttl: 8 });
+      const left = g.aiJets.filter(j => j.alive && j.team === 'red').length, drones = g.drones.filter(d => d.alive && d.team === 'red').length;
+      g.comms.call('awacs', left ? `Magic copies, splash one. ${title(NUMW[left] || String(left))} bandit${left > 1 ? 's' : ''} remaining.` : drones ? 'Magic copies, splash. No more fighters, the drone is still up.' : 'Magic copies, splash. Picture clean.',
+        left ? `${left} enemy fighter${left > 1 ? 's' : ''} left.` : drones ? `That was the last enemy fighter; ${drones} enemy drone${drones > 1 ? 's are' : ' is'} still flying.` : 'The sky is clear of enemy fighters.', { pri: 2, ttl: 8 });
     } else if (e.kind === 'ship') this.say(`good hits, the ${tagOf(e) === 'ENEMY DESTROYER' ? 'destroyer' : 'frigate'} is burning.`, `Your wingman's anti-ship missile sank the ${tagOf(e).toLowerCase()}.`, { pri: 3, ttl: 6 });
     else this.say('shack!', `Your wingman destroyed the ${tagOf(e).toLowerCase()}.`, { key: 'w-shack', every: 3, pri: 2, ttl: 6 });
   }
@@ -165,7 +168,10 @@ export class Wingman extends AIJet {
     if (id === 'cover') { this.order = 'cover'; this.say('copy, covering you.', 'Your wingman stays on your right wing and fights any enemy jet that comes within 25 km of you.', ack); }
     else if (id === 'hunt') {
       this.order = 'hunt';
-      this.say('copy, going hunting.', g.mission && g.mission.kind === 'strike' ? 'Your wingman takes out air defenses on his own (anti-radar missiles and small bombs from long range) and fights any jet that comes near. O then 4 calls him back.' : 'Your wingman goes after the enemy jets on his own. O then 4 calls him back.', ack);
+      const k = g.mission && g.mission.kind;
+      this.say('copy, going hunting.', k === 'strike' ? 'Your wingman takes out air defenses on his own (anti-radar missiles and small bombs from long range) and fights any jet that comes near. O then 4 calls him back.'
+        : k === 'naval' ? 'Your wingman attacks the enemy warships on his own with his two anti-ship missiles and fights any jet that comes near. O then 4 calls him back.'
+          : k === 'defense' ? 'Your wingman goes after the incoming drones and missiles on his own. O then 4 calls him back.' : 'Your wingman goes after the enemy jets on his own. O then 4 calls him back.', ack);
     } else if (id === 'rejoin') { this.order = 'rejoin'; this.foe = null; this.radar.stt = null; this.say('rejoining.', 'Your wingman stops what he is doing and flies back to your right wing.', ack); }
     else if (id === 'home') { this.order = 'home'; this.foe = null; this.radar.stt = null; this.say('copy, RTB.', 'Your wingman flies back to the carrier and circles over it. O then 4 brings him back.', ack); }
     return true;
@@ -183,9 +189,9 @@ export class Wingman extends AIJet {
     if (o === 'rejoin' || o === 'home' || this.holding()) return null;
     if (o === 'attack' && this.orderTgt && this.orderTgt.kind === 'air') return this.canFight(this.orderTgt) ? this.orderTgt : null;
     // on a bomb run only a bandit close by counts; hunting in the strike, the air defenses come first
-    const reach = this.strike || o === 'attack' ? 12000 : o === 'hunt' ? (M && M.kind === 'strike' && this.huntTargets().length ? 15000 : 90000) : 0;
+    const reach = this.strike || o === 'attack' ? 12000 : o === 'hunt' ? (M && (M.kind === 'strike' || M.kind === 'naval') && this.huntTargets().length ? 15000 : 90000) : 0;
     let best = null, bs = Infinity;
-    for (const j of g.aiJets) {
+    for (const L of [g.aiJets, g.drones]) for (const j of L) {
       if (!this.canFight(j) || (o === 'hunt' && this.ignore && this.ignore.j === j && g.time < this.ignore.until)) continue;
       const R = j.pos.distanceTo(this.pos);
       if (reach ? R > reach : R > 15000 && j.pos.distanceTo(P.pos) > 25000) continue;
@@ -236,8 +242,12 @@ export class Wingman extends AIJet {
   // what he goes after on his own: in the city strike the air defenses, then the warships; never the bunker, that is
   // the player's job
   huntTargets() {
-    const M = this.game.mission; if (!M || M.kind !== 'strike' || M.ended) return [];
-    return (M.state === 'sead' ? M.defenses : M.fleet || []).filter(e => e.alive && this.groundWeapon(e));
+    const M = this.game.mission; if (!M || !(M.kind === 'strike' || M.kind === 'naval') || M.ended) return [];
+    const ok = (e) => e.alive && this.groundWeapon(e);
+    if (M.kind === 'strike' && M.state === 'sead') return M.defenses.filter(ok);
+    // campaign bunker stage: the guns around the HQ before the warships
+    const defs = M.stage && M.kind === 'strike' ? (M.defenses || []).filter(ok) : [];
+    return defs.length ? defs : (M.fleet || []).filter(ok);
   }
   huntTarget() {
     const g = this.game, busy = new Set([g.player.tgp.target]);
@@ -271,7 +281,7 @@ export class Wingman extends AIJet {
     if (this.order === 'hunt' && !this.strike && !this.fighting()) {
       const T = this.huntTarget();
       if (T) { this.startStrike(T, this.groundWeapon(T), true); this.idleT = 0; }
-      else if (!this.foe && (this.huntTargets().length === 0 || g.mission.kind !== 'strike') && (this.idleT += 0.25) > 8) {
+      else if (!this.foe && (this.huntTargets().length === 0 || !(g.mission.kind === 'strike' || g.mission.kind === 'naval')) && (this.idleT += 0.25) > 8) {
         const out = g.mission && g.mission.kind === 'strike' && this.weapons.gbu39 + this.weapons.agm88 + this.weapons.agm84 === 0;
         this.order = 'cover';
         this.say(out ? 'Winchester, rejoining.' : 'nothing left to hunt, rejoining.', out ? 'Your wingman has used all his bombs and anti-radar missiles and comes back to your wing.' : 'Your wingman found nothing more he can attack and comes back to your wing.', { pri: 1, ttl: 8 });
@@ -466,4 +476,36 @@ export class Wingman extends AIJet {
     for (const t of [].concat(this.contrail || [], this.vortexL || [], this.vortexR || [], this.smokeTrail || [])) t.stop();
     if (this.fire_) this.fire_.life = 0;
   }
+}
+
+// A friendly strike flight that isn't the player's wingman (Hammer 2-1 and 2-2 in the campaign's bunker stage): the
+// same jet, weapons and attack runs, hunting its own target list (the AA around the city, the parked jets at the
+// airfield), then home to circle the carrier. It never joins the player's formation.
+export class StrikeWing extends Wingman {
+  constructor(game, o) {
+    super(game, { loadout: 'strike', pos: o.pos, heading: o.heading, speed: 230 });
+    this.name = o.name; this.callsign = o.callsign; this.isStrikeWing = true; this.extraTargets = o.targets || [];
+    this.order = 'hunt'; this.mode = 'join'; this.joined = true; this.audioGain = 0.4;
+  }
+  say(text, plain, o = {}) {
+    const g = this.game; if (!g.comms || g.attract || !this.alive) return;
+    const p = (plain || '').replace(/[Yy]our wingman/g, this.callsign).replace(/comes back to your wing/g, 'heads back to the carrier');
+    g.comms.call('wing', `${this.callsign}, ${text}`, p, { pri: 1, ttl: 6, ...o, from: this.name, key: o.key ? `${o.key}-${this.name}` : undefined });
+  }
+  checkIn() { }
+  huntTargets() {
+    const M = this.game.mission; if (!M || M.ended) return [];
+    return [...(M.defenses || []), ...this.extraTargets].filter(e => e.alive && this.groundWeapon(e));
+  }
+  think() {
+    super.think();
+    // done hunting (or the mission is over): home to the ship rather than onto the player's wing
+    if (this.order === 'cover' || this.order === 'rejoin') { this.order = 'home'; this.strike = null; }
+  }
+  creditKill(e) {
+    const g = this.game; this.kills++;
+    g.msg(`${this.name} ${e.kind === 'air' ? 'SHOT DOWN' : 'DESTROYED'} ${tagOf(e)}`, 3, '#b0ffb0');
+    this.say(e.kind === 'air' ? 'splash one!' : 'shack!', `${this.callsign} destroyed the ${tagOf(e).toLowerCase()}.`, { key: 'h-shack', every: 4, pri: 1, ttl: 5 });
+  }
+  statusText() { return super.statusText().replace('ON YOUR RIGHT WING', 'ON STATION'); }
 }

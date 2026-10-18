@@ -19,11 +19,18 @@ export const LOADOUTS = {
   strike: { L1: 'aim9x', R1: 'aim9x', L2: 'agm88', R2: 'agm88', L3: 'gbu39x4', R3: 'gbu39x4', L4: 'gbu31', R4: 'gbu31', R6: 'aim120' },
   air: { L1: 'aim9x', R1: 'aim9x', L2: 'aim120', R2: 'aim120', L3: 'aim120', R3: 'aim120', L4: 'aim120', R4: 'aim120', R6: 'aim120' },
   cas: { L1: 'aim9x', R1: 'aim9x', L2: 'agm65', R2: 'agm65', L3: 'agm65', R3: 'agm65', L4: 'gbu12', R4: 'gbu12', C5: 'mk84', R6: 'aim120' },
+  // campaign stages: four anti-radar missiles and eight small bombs; five Harpoons (the warships shoot some down)
+  sead: { L1: 'aim9x', R1: 'aim9x', L2: 'agm88', R2: 'agm88', L3: 'agm88', R3: 'agm88', L4: 'gbu39x4', R4: 'gbu39x4', R6: 'aim120' },
+  naval: { L1: 'aim9x', R1: 'aim9x', L2: 'aim120', R2: 'aim120', L3: 'agm84', R3: 'agm84', L4: 'agm84', R4: 'agm84', C5: 'agm84', R6: 'aim120' },
+  // the ring course: wingtip missiles only, nothing to slow the jet down
+  clean: { L1: 'aim9x', R1: 'aim9x' },
 };
 // What the jet is loaded with for a mission (mission.kind). 'auto', the menu default, is the mission's own load. Any
 // pick flies the city strike with bunker busters, as nothing else hurts the bunker: air-to-air only becomes the mixed
-// load, and a load without them gets two on the inboard pylons.
-export function missionLoadout(pick, kind) {
+// load, and a load without them gets two on the inboard pylons. A campaign stage always flies its own load (stage).
+export function missionLoadout(pick, kind, stage) {
+  if (stage && LOADOUTS[stage]) return LOADOUTS[stage];
+  if (kind === 'rings') return LOADOUTS.clean;
   const L = pick !== 'auto' && LOADOUTS[pick];
   if (kind === 'strike') {
     if (!L) return LOADOUTS.strike;

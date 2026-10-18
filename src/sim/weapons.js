@@ -157,7 +157,7 @@ export class Missile {
     const ship = tgt.kind === 'ship';
     const seen = tgt.alive && this.pos.distanceTo(tgt.pos) < d.seekerRange &&
       _v.copy(tgt.pos).sub(this.pos).normalize().dot(_v2.copy(this.vel).normalize()) > Math.cos(d.seekerCone * D2R) &&
-      (ship || !inNotch(g.terrain, this.pos, tgt.pos, tgt.vel, 24)) && g.terrain.lineOfSight(this.pos, ship ? _v3.copy(tgt.pos).setY(tgt.pos.y + 15) : tgt.pos, true, 1);
+      (ship || !inNotch(g.terrain, this.pos, tgt.pos, tgt.vel, tgt.notchV ?? 24)) && g.terrain.lineOfSight(this.pos, ship ? _v3.copy(tgt.pos).setY(tgt.pos.y + 15) : tgt.pos, true, 1);
     if (this.track && this.track.isChaff) {
       // already seduced: follow chaff until it fades, then try to reacquire
       if (this.track.age > 5) this.track = null; else { this.lastKnown.copy(this.track.pos); this.lastKnownVel.copy(this.track.vel); return; }

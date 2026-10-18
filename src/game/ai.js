@@ -569,10 +569,16 @@ export class ShipDefense {
       const aimed = (m.target === e) || (m.lastKnown && m.lastKnown.distanceTo(e.pos) < 400) || (blue && m.target && m.target.team === 'blue' && !m.target.isMissile);
       const d = m.pos.distanceTo(e.pos); if (aimed && d < td) { td = d; threat = m; }
     }
+    // attack drones and cruise missiles diving on the group count as inbound weapons too
+    if (blue) for (const d of g.drones) {
+      if (!d.alive || d.team === team || !d.target || d.target.team !== team) continue;
+      if (g.world.missiles.some(x => !x.dead && x.target === d)) continue;
+      const r = d.pos.distanceTo(e.pos); if (r < td && r < 7000) { td = r; threat = d; }
+    }
     // aircraft to engage: enemy ships watch the player, escorts pick the nearest enemy jet
     let air = null;
     if (!blue) { let bd = this.samRange; for (const c of blueAir(g)) { const d = c.pos.distanceTo(e.pos) * (c.isPlayer ? 0.85 : 1); if (d < bd) { bd = d; air = c; } } }
-    else { let bd = this.samRange; for (const j of g.aiJets) { if (!j.alive || j.team === team) continue; const d = j.pos.distanceTo(e.pos); if (d < bd) { bd = d; air = j; } } }
+    else { let bd = this.samRange; for (const L of [g.aiJets, g.drones]) for (const j of L) { if (!j.alive || j.team === team) continue; const d = j.pos.distanceTo(e.pos); if (d < bd) { bd = d; air = j; } } }
     const R = this.radar; if (R.reacqT > 0) R.reacqT -= dt;
     let airSeen = false;
     if (air && air.pos.distanceTo(e.pos) < this.samRange && !(R.reacqT > 0)) {

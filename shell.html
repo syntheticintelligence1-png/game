@@ -59,6 +59,32 @@ legend, .lbl { font-family: var(--f-data); font-size: 11px; letter-spacing: 0.16
 .scn label:has(input:checked) { border-color: var(--amber); background: #221c12; }
 .scn label:has(input:checked) strong { color: var(--amber); }
 .scn label:has(input:focus-visible) { outline: 2px solid var(--amber); outline-offset: 2px; }
+.scn label.wide { grid-column: 1 / -1; border-left: 3px solid var(--amber); }
+.scn label.wide strong::after, .scn label.new strong::after { content: "NEW"; font: 700 9px var(--f-data); letter-spacing: 0.14em; color: #1a1206; background: var(--amber); padding: 2px 5px; margin-left: 8px; vertical-align: 3px; }
+/* campaign stage picker */
+.camp { display: grid; gap: 6px; }
+.camp-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.camp-row button { font: 700 10px var(--f-data); letter-spacing: 0.03em; line-height: 1.25; padding: 6px 3px 5px; display: grid; gap: 3px; justify-items: center; align-content: start; text-align: center; color: var(--muted); min-width: 0; }
+.camp-row button b { font: 900 20px var(--f-display); line-height: 1; color: var(--text); }
+.camp-row button i { font-style: normal; font-size: 10px; color: var(--datum); min-height: 1.2em; }
+.camp-row button.sel { border-color: var(--amber); background: #221c12; color: var(--amber); }
+.camp-row button.sel b { color: var(--amber); }
+@media (max-width: 640px) { .camp-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* theater map (N while flying) */
+#theater { z-index: 4; align-items: center; justify-content: center; gap: 16px; background: rgba(5, 8, 12, 0.55); pointer-events: none; }
+.map-open #coach, .map-open #keys-card { visibility: hidden; }
+#theater canvas { display: block; border: 1px solid var(--rule); background: #0a1822; }
+.th-wrap { display: grid; gap: 8px; }
+.th-head { display: flex; flex-wrap: wrap; gap: 4px 16px; font-family: var(--f-data); font-size: 11px; letter-spacing: 0.1em; color: var(--muted); }
+.th-head b { color: var(--amber); }
+.th-side { width: 300px; background: rgba(7, 11, 16, 0.88); border: 1px solid var(--rule); border-left: 3px solid var(--amber); padding: 10px 12px; font-family: var(--f-data); font-size: 11px; line-height: 1.6; align-self: center; }
+.th-side h3 { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin: 6px 0 2px; }
+.th-side ul { list-style: none; margin: 0 0 6px; padding: 0; color: #9fd3ff; }
+.th-side ul.red { color: #ff8576; }
+.th-keys, .th-note { margin: 8px 0 0; color: var(--text); font-family: var(--f-body); font-size: 12px; line-height: 1.5; }
+.th-note { color: var(--muted); }
+.th-side kbd { font-family: var(--f-data); font-size: 10px; padding: 2px 5px; color: var(--text); background: #1f2a34; border: 1px solid #3b4a58; border-bottom-width: 2px; border-radius: 3px; }
+@media (max-width: 900px) { #theater { flex-direction: column; } .th-side { width: auto; } }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .field { display: grid; gap: 4px; min-width: 0; }
 select, input[type=range] { width: 100%; font: 13px var(--f-body); color: var(--text); background: var(--deck); border: 1px solid var(--rule); padding: 7px 8px; border-radius: 0; }
@@ -229,16 +255,23 @@ details.settings { background: transparent; }
       <fieldset>
         <legend>Mission</legend>
         <div class="scn">
+          <label class="wide"><input type="radio" name="scenario" value="campaign"><strong>Campaign · Operation Trident</strong><small>Five missions in a row over the same island, each one starting the way the last one ended: clear the sky, blind their radars, hit the bunker, sink the fleet, then hold off drone swarms attacking your carrier.</small></label>
           <label><input type="radio" name="scenario" value="carrier" checked><strong>Carrier takeoff</strong><small>Get launched off the ship, then fly the city strike. Best first mission.</small></label>
           <label><input type="radio" name="scenario" value="air"><strong>Dogfight</strong><small>Start in the air and shoot down four enemy fighters.</small></label>
           <label><input type="radio" name="scenario" value="strike"><strong>City strike</strong><small>Knock out the radars and AA guns around the city, then hit the command bunker with a bunker buster.</small></label>
           <label><input type="radio" name="scenario" value="approach"><strong>Carrier landing</strong><small>Start behind the ship and land on the deck. The landing assist flies it with you; Enter = try again.</small></label>
           <label><input type="radio" name="scenario" value="deck"><strong>Taxi to catapult</strong><small>Drive the parked jet onto the catapult yourself.</small></label>
+          <label class="new"><input type="radio" name="scenario" value="rings"><strong>Ring course</strong><small>No enemies: race through 14 glowing rings over the sea, down the runway, through the canyons and over the city. Your best time is saved.</small></label>
+        </div>
+        <div class="camp" id="camp-pick" hidden>
+          <span class="lbl">Campaign stage (your progress is saved)</span>
+          <div class="camp-row" id="camp-row"></div>
+          <p class="note" id="camp-note"></p>
         </div>
       </fieldset>
       <div class="field"><label class="lbl" for="opt-loadout">Weapons</label>
         <select id="opt-loadout"><option value="auto" selected>Automatic: the right weapons for the mission</option><option value="multirole">Mixed: air-to-air, anti-radar, bunker busters</option><option value="strike">City strike: anti-radar missiles, 8 small bombs, bunker busters</option><option value="air">Air-to-air missiles only</option><option value="cas">Ground attack: laser bombs, Mavericks, big bomb</option></select>
-        <p class="note">Whatever you pick, the city strike always carries bunker busters, also after rearming.</p></div>
+        <p class="note" id="loadout-note">Whatever you pick, the city strike always carries bunker busters, also after rearming.</p></div>
       <label class="check" for="opt-practice"><input type="checkbox" id="opt-practice"> Practice: enemy missiles can't hurt you</label>
       <div class="actions">
         <button type="button" id="launch" class="primary">PLAY</button>
@@ -275,6 +308,8 @@ details.settings { background: transparent; }
         <kbd>1 – 5</kbd><span>Pick a weapon yourself: 1 heat-seeker · 2 radar missile · 3 small guided bombs / Maverick · 4 bunker buster &amp; bombs · 5 anti-radar</span>
         <kbd>C</kbd><span>Gun (hold)</span>
         <kbd>O, then 1 – 5</kbd><span>Orders for your wingman Spear 1-2: 1 attack the target you locked or marked with T · 2 cover me · 3 hunt on your own · 4 rejoin on me · 5 go home to the ship</span>
+        <kbd>N</kbd><span>Theater map: every jet, drone, ship and SAM where it is now. The autopilot holds the jet while it is open</span>
+        <kbd>J</kbd><span>Speed up time (×2, ×4) on the long flights. It drops back to normal by itself when an enemy comes close</span>
         <kbd>X</kbd><span>Countermeasures: chaff (fools radar missiles) + flares (fool heat-seekers). Best when the BREAK cue says NOW and the threat is beside you</span>
         <kbd>Z</kbd><span>Chaff only</span>
         <kbd>F1 · F2 · F3</kbd><span>Cockpit · outside view · weapon camera</span>
@@ -301,10 +336,12 @@ details.settings { background: transparent; }
     </div>
     <p class="lbl">Jump to a mission</p>
     <div class="row">
+      <button type="button" class="small" data-scn="campaign">CAMPAIGN</button>
       <button type="button" class="small" data-scn="carrier">TAKEOFF</button>
       <button type="button" class="small" data-scn="air">DOGFIGHT</button>
       <button type="button" class="small" data-scn="strike">CITY STRIKE</button>
       <button type="button" class="small" data-scn="approach">LANDING</button>
+      <button type="button" class="small" data-scn="rings">RING COURSE</button>
     </div>
     <p class="note">While flying, the box on the left says what to press next, and the controls card sits bottom-left (Tab hides it).</p>
   </div>
@@ -317,11 +354,12 @@ details.settings { background: transparent; }
     <p class="db-grade" id="db-grade"></p>
     <div class="db-stats">
       <div><span class="lbl">Time</span><b id="db-time">0:00</b></div>
-      <div><span class="lbl">Targets hit</span><b id="db-kills">0</b></div>
+      <div><span class="lbl" id="db-kills-l">Targets hit</span><b id="db-kills">0</b></div>
       <div><span class="lbl">Jet health</span><b id="db-hp">100%</b></div>
     </div>
     <ul class="db-list" id="db-list"></ul>
     <div class="row">
+      <button type="button" id="db-next" class="primary small" hidden>NEXT STAGE</button>
       <button type="button" id="db-continue" class="primary small">KEEP FLYING</button>
       <button type="button" id="db-again" class="small">FLY AGAIN</button>
       <button type="button" id="db-menu" class="small">MAIN MENU</button>
@@ -353,6 +391,13 @@ details.settings { background: transparent; }
   </div>
 </section>
 
+<section id="theater" class="overlay" hidden aria-label="Theater map">
+  <div class="th-wrap">
+    <div class="th-head" id="th-head"></div>
+    <canvas id="th-canvas" role="img" aria-label="Live map of the island: you, friendly and enemy aircraft, drones, ships and SAM ranges"></canvas>
+  </div>
+  <div class="th-side" id="th-side"></div>
+</section>
 <aside id="radio" hidden aria-live="polite" aria-label="Radio"></aside>
 <aside id="coach" hidden aria-live="polite"></aside>
 <aside id="keys-card" hidden>
@@ -365,6 +410,7 @@ details.settings { background: transparent; }
     <dt>Wingman</dt><dd><kbd>O</kbd> orders, then <kbd>1</kbd>–<kbd>5</kbd> (the menu lists them)</dd>
     <dt>Jet</dt><dd><kbd>G</kbd> gear · <kbd>H</kbd> hook · <kbd>B</kbd> brake · <kbd>F</kbd> catapult</dd>
     <dt>View</dt><dd><kbd>F1</kbd> cockpit · <kbd>F2</kbd> outside · <kbd>V</kbd> night/heat · <kbd>P</kbd> pause</dd>
+    <dt>Map</dt><dd><kbd>N</kbd> theater map · <kbd>J</kbd> speed up time</dd>
   </dl>
   <div class="kc-mini"><kbd>Tab</kbd> show controls</div>
 </aside>

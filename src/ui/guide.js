@@ -5,6 +5,8 @@ import * as THREE from 'three';
 import { DEFS } from '../sim/weapons.js';
 import { JET } from '../sim/flight.js';
 import { tagOf } from '../game/world.js';
+import { WAVES } from '../game/campaign.js';
+import { fmtRace } from '../game/rings.js';
 
 const KT = 1.94384, FT = 3.28084;
 const _f = new THREE.Vector3(), _j = new THREE.Vector3();
@@ -221,25 +223,91 @@ export class Guide {
       return out;
     }
 
+    // ---- the ring course ----
+    const MR = g.mission;
+    if (MR && MR.kind === 'rings' && MR.ctl && !MR.ended) {
+      const R = MR.ctl, ring = R.next(), n = R.rings.length;
+      out.title = `Ring course: ring ${Math.min(R.i + 1, n)} of ${n} · ${R.clock()}`;
+      if (ring) {
+        const w = this.where(ring.pos), dy = ring.pos.y - s.p.y, ft = Math.round(Math.abs(dy) * FT / 100) * 100;
+        step(w.km < 1.2 ? 'now' : Math.abs(w.rel) < 12 ? 'done' : 'now', ['A', 'D'], w.km < 1.2 ? 'Through the green ring — hold it steady' : Math.abs(w.rel) < 12 ? `Green ring straight ahead, ${w.km.toFixed(1)} km` : `Turn toward the green circle: ${w.text} (roll with A / D, pull S)`);
+        step(Math.abs(dy) < 60 ? 'done' : 'now', dy > 0 ? ['S'] : ['W'], Math.abs(dy) < 60 ? 'Height is right' : dy > 0 ? `Climb ${ft.toLocaleString('en-US')} ft: pull back gently with S` : `Go down ${ft.toLocaleString('en-US')} ft: push W gently`);
+        step(ias > 380 ? 'done' : 'opt', ['Shift'], ias > 380 ? `Fast: ${Math.round(ias)} knots` : `Shift for more speed (${Math.round(ias)} knots), Ctrl to slow down for tight turns`);
+        step('next', [], 'The orange ring (dashed circle on the HUD) is the one after it');
+        step('opt', ['Enter'], 'Start the course over');
+      }
+      out.tip = `Par ${fmtRace(R.par)}${R.best ? ` · your best ${fmtRace(R.best)}` : ''}. Missed a ring? Turn around and fly through it: it stays green until you do.`;
+      return out;
+    }
+    if (MR && MR.kind === 'rings' && MR.ctl && MR.success) {
+      const R = MR.ctl, t = R.elapsed();
+      out.title = `Course complete · ${fmtRace(t)}`;
+      step('now', ['Enter'], 'Fly the course again and beat your time');
+      step('opt', ['G'], `Or fly home: the carrier is ${this.where(g.carrier.root.position).text}. Gear down near the ship, then follow the green circle`);
+      out.tip = `Par ${fmtRace(R.par)} · your best ${fmtRace(R.best ? Math.min(R.best, t) : t)}.`;
+      return out;
+    }
     // just launched
     if ((g.time - this.launchedAt < 40 || c.gearCmd) && agl < 3000) {
       out.title = 'You’re flying!';
       step(s.v.y > 3 || agl > 900 ? 'done' : 'now', ['S'], 'Pull back gently with S to climb');
       step(c.gearCmd ? 'now' : 'done', ['G'], 'Raise the landing gear');
       step(ias > 260 ? 'done' : 'now', ['Shift'], `Keep the power up (${Math.round(ias)} knots)`);
-      step('next', [], g.mission && g.mission.kind === 'strike' ? 'Then head for the city — follow the orange arrow' : 'Then go find the enemy — these steps change as you go');
+      const k0 = g.mission && g.mission.kind;
+      step('next', [], k0 === 'strike' ? 'Then head for the city — follow the orange arrow' : k0 === 'naval' ? 'Then head for the warships — follow the orange diamonds' : k0 === 'defense' ? 'Then fly north of the ship and wait for the drones' : 'Then go find the enemy — these steps change as you go');
       return out;
     }
 
     const sel = P.sel;
     // ---- the city strike mission ----
-    const M = g.mission;
+    const M = g.mission, stg = M && M.stage ? `Stage ${M.ctl ? M.ctl.stageNo : ''}: ` : '';
+    const jetNear = () => g.aiJets.find((j) => j.alive && j.team === 'red' && j.pos.distanceTo(s.p) < 22000);
+    // ---- campaign stage 4: the warships ----
+    if (M && M.kind === 'naval' && !M.ended) {
+      const ships = (M.fleet || []).filter((e) => e.alive).sort((a, b) => a.pos.distanceToSquared(s.p) - b.pos.distanceToSquared(s.p));
+      out.title = `${stg}Sink the warships (${M.fleet.length - ships.length}/${M.fleet.length})`;
+      const jet = jetNear();
+      if (jet && !P.airWeapon) out.alerts.push({ cls: 'warn', html: `Enemy fighter ${(jet.pos.distanceTo(s.p) / 1000).toFixed(0)} km away — ${kb('2')} radar missile, ${kb('T')} lock, ${kb('Space')} fire (then back to the ships)` });
+      const n = P.count('agm84');
+      if (!n) step('now', [], 'No Harpoons left — land on the carrier and press F on the deck to rearm');
+      else {
+        const tgt = P.tgp.target && P.tgp.target.alive && M.fleet.includes(P.tgp.target) ? P.tgp.target : null;
+        const km = tgt ? tgt.pos.distanceTo(s.p) / 1000 : 0;
+        step(sel === 'agm84' ? 'done' : 'now', ['3'], sel === 'agm84' ? `Harpoon anti-ship missile selected (${n} left)` : 'Press 3 for the Harpoon anti-ship missile');
+        step(tgt ? 'done' : sel === 'agm84' ? 'now' : 'next', ['T'], tgt ? `Marked: ${tagOf(tgt)}, ${km.toFixed(0)} km` : 'Face the warships and press T to mark one (T again = next)');
+        step(tgt && km <= 40 ? 'now' : 'next', ['Space'], !tgt ? 'Fire from 20–40 km' : km > 40 ? `Fly closer: ${km.toFixed(0)} km now, fire inside 40 km` : km < 13 ? 'Too close: their SAMs reach you here! Fire, then turn away hard' : 'In range — press Space to fire, then turn away');
+        step('next', [], 'Fire two at the destroyer: their guns can shoot one down');
+      }
+      const W = g.wingman;
+      if (W && W.alive && !W.deck) { const busy = W.order === 'hunt' || !!W.strike; step(busy ? 'done' : 'next', ['O', '3'], busy ? 'Your wingman is attacking the ships too' : 'O, then 3 sends your wingman after the ships'); }
+      out.tip = ships.length ? `Nearest warship: ${tagOf(ships[0]).toLowerCase()}, ${this.where(ships[0].pos).text}. Their SAMs reach 13 km.` : '';
+      return out;
+    }
+    // ---- campaign stage 5: drones and missiles against the carrier ----
+    if (M && M.kind === 'defense' && !M.ended && M.ctl) {
+      const cv = g.carrier.entity, ctl = M.ctl;
+      const threats = (g.drones || []).filter((d) => d.alive && d.team === 'red').sort((a, b) => a.pos.distanceToSquared(cv.pos) - b.pos.distanceToSquared(cv.pos));
+      out.title = `${stg}Protect the carrier (${Math.max(0, Math.round(cv.hp / cv.maxHp * 100))}%)`;
+      if (!threats.length) {
+        step('now', [], ctl.waveI < WAVES.length ? `Wave ${ctl.waveI + 1} of ${WAVES.length} is on its way — fly north of the ship and wait` : 'All waves are down!');
+        step('next', ['J'], 'J speeds up time while you wait (it slows down again when they arrive)');
+        step('next', ['N'], 'N opens the theater map: every drone is on it');
+      } else {
+        const lock = P.radar.stt && P.radar.stt.alive ? P.radar.stt : null, km = lock ? lock.pos.distanceTo(s.p) / 1000 : 0;
+        step(lock ? 'done' : 'now', ['T'], lock ? `Locked: ${lock.name}, ${km.toFixed(1)} km` : 'Turn toward the drones (orange triangles) and press T to lock one');
+        step(lock ? 'now' : 'next', ['Space'], lock ? (sel === 'aim9x' || sel === 'aim120' ? 'Press Space to fire!' : 'Press 2 (or 1 up close), then Space') : 'Fire once you have a lock');
+        step('next', ['C'], 'Drones are slow: get behind one and hold C for the gun');
+        if (threats.some((d) => d.type === 'cruise')) step('now', ['2'], 'Anti-ship missiles coming! They are fast: lock them first and fire radar missiles (2)');
+      }
+      out.tip = threats.length ? `${threats.length} inbound. Closest to the ship: ${threats[0].name.toLowerCase()}, ${(threats[0].pos.distanceTo(cv.pos) / 1000).toFixed(1)} km from it, ${this.where(threats[0].pos).text}.` : '';
+      return out;
+    }
     if (M && M.kind === 'strike') {
       const jet = g.aiJets.find((j) => j.alive && j.team === 'red' && j.pos.distanceTo(s.p) < 22000);
       if (jet && !P.airWeapon) out.alerts.push({ cls: 'warn', html: `Enemy fighter ${(jet.pos.distanceTo(s.p) / 1000).toFixed(0)} km away — ${kb('2')} radar missile, ${kb('T')} lock, ${kb('Space')} fire (then back to the mission)` });
       if (M.state === 'sead') {
         const left = M.defenses.filter((e) => e.alive).sort((a, b) => a.pos.distanceToSquared(s.p) - b.pos.distanceToSquared(s.p));
-        out.title = `Mission 1 of 2: Knock out the air defenses (${M.defensesTotal - left.length}/${M.defensesTotal})`;
+        out.title = `${stg || 'Mission 1 of 2: '}Knock out the air defenses (${M.defensesTotal - left.length}/${M.defensesTotal})`;
         const mk = P.tgp.target && P.tgp.target.alive && M.defenses.includes(P.tgp.target) ? P.tgp.target : null;
         if (P.count('gbu39') > 0) {
           step(mk ? 'done' : 'now', ['T'], mk ? `Marked: ${tagOf(mk)} (${this.where(mk.pos).text})` : 'Point your nose at the city and press T — it marks the target nearest your nose (T again = next)');
@@ -276,7 +344,7 @@ export class Guide {
         return out;
       }
       if (M.state === 'strike') {
-        const B = M.bunker; out.title = 'Mission 2 of 2: Destroy the command bunker';
+        const B = M.bunker; out.title = `${stg || 'Mission 2 of 2: '}Destroy the command bunker`;
         if (!P.count('gbu31')) { step('now', [], 'No bunker busters left — land on the carrier, press F to rearm'); return out; }
         step(sel === 'gbu31' ? 'done' : 'now', ['4'], sel === 'gbu31' ? 'Bunker buster selected' : 'Press 4 for the bunker buster');
         const marked = P.tgp.target === B;
@@ -298,7 +366,7 @@ export class Guide {
         return out;
       }
     }
-    if (M && M.kind === 'dogfight' && M.state === 'fight') out.title = `Dogfight: ${M.jets.filter((j) => j.alive).length} enemy jets left`;
+    if (M && M.kind === 'dogfight' && M.state === 'fight') out.title = stg ? `${stg}Clear the sky (${M.jets.filter((j) => j.alive).length} left)` : `Dogfight: ${M.jets.filter((j) => j.alive).length} enemy jets left`;
     // ground attack
     if (GROUND_WEAPONS.has(sel)) {
       out.title = 'Ground attack';
@@ -343,7 +411,7 @@ export class Guide {
     }
 
     // air combat
-    const jets = g.aiJets.filter((j) => j.alive && j.team === 'red');
+    const jets = [...g.aiJets, ...(g.drones || [])].filter((j) => j.alive && j.team === 'red');
     out.title = out.title || 'Air combat';
     if (!jets.length) {
       step('done', [], 'No enemy jets left');
@@ -371,7 +439,7 @@ export class Guide {
     if (W && W.alive && !W.deck) step(W.fighting() ? 'done' : 'next', ['O', '1'], W.fighting() ? 'Your wingman is in the fight too' : 'Lock a jet with T, then O and 1: your wingman attacks it');
     let best = null, bd = Infinity;
     for (const j of jets) { const d = j.pos.distanceToSquared(s.p); if (d < bd) { bd = d; best = j; } }
-    if (best) out.tip = `Nearest enemy jet: ${this.where(best.pos).text}. ${g.opts.realistic ? 'To turn: roll with A/D, then pull S.' : 'Hold A or D to turn toward it (add S to turn tighter).'}`;
+    if (best) out.tip = `Nearest enemy ${best.isDrone ? (best.type === 'recon' ? 'spy drone' : 'drone') : 'jet'}: ${this.where(best.pos).text}. ${g.opts.realistic ? 'To turn: roll with A/D, then pull S.' : 'Hold A or D to turn toward it (add S to turn tighter).'}`;
     return out;
   }
 

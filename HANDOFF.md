@@ -30,6 +30,11 @@ Web Audio, everything procedural (no asset files). Plain JS ES modules, bundled 
   and wing drop in flight.js); compare a few runs, not one.
 - `node test/loadout.mjs`: the weapons for every menu pick on every mission, the bunker busters a city strike always
   carries (also after F on the deck rearms the jet), and catapult shots with the strike load. Quick.
+- `node test/campaign.mjs`: all five campaign stages (world state carried over, loads, win / lose, the fleet refloated
+  on a retry), time speed-up (J) and the theater map autopilot (N). About 2 minutes.
+- `node test/drones.mjs`: spy drone reports, attack-drone and cruise-missile raids against the carrier group, the gun
+  against a drone, the Reaper marking targets. `node test/rings.mjs`: the ring course (a simple pilot flies all 14
+  rings with the real flight model, misses, Enter restart, practice respawn, crash). Both about a minute.
 - `node test/glsl_check.mjs`: shader validation (needs glslangValidator). "'average' : function name is redeclaration"
   is a known false positive.
 - Real-browser screenshots: `node test/browser.mjs strike 10` and `node test/visual.mjs night` (Playwright + Chromium
@@ -56,7 +61,9 @@ Web Audio, everything procedural (no asset files). Plain JS ES modules, bundled 
   bombs. game.js `loadWeapons()` loads it at launch, at the F rearm on the deck and at practice respawns. A weapons
   pick saved before Automatic existed (no `weaponsV: 2` in the saved settings) starts over on Automatic.
 - `src/game/ai.js`: AI jets for either side (team 'red' or 'blue'), SA-21 / SA-15 / AA guns, ship defenses (enemy ships and, with team 'blue', our escorts)
-- `src/game/wingman.js`: the wingman Spear 1-2 (see below)
+- `src/game/wingman.js`: the wingman Spear 1-2 (see below) and `StrikeWing` (Hammer flight in campaign stage 3)
+- `src/game/campaign.js`: Operation Trident (STAGES, StageControl, WAVES), `src/game/drones.js` + `src/models/drones.js`:
+  drones and UAVs, `src/game/rings.js`: the ring course, `src/ui/theater.js`: the live theater map (N)
 - `src/game/helo.js`: helicopters circling the carrier group (scenery only); the model is `buildHelo()` in src/models/units.js
 - `src/game/assist.js`: easy controls (bank-to-turn, auto-level) and the LandingAssist (see below). `cameras.js`, `input.js`, `world.js`
 - `src/sim/`: flight.js (6-DOF RK4 + flight control system), weapons.js (missiles/bombs/guidance), radar.js (detection, notch, chaff, RWR), carrierOps.js (catapult, wires, ships), atmo.js
@@ -193,10 +200,52 @@ Web Audio, everything procedural (no asset files). Plain JS ES modules, bundled 
   text: no more "9.6 km to your right of you" or "fired a missile at you from to your right".
 - Checked with test/screens.mjs at 1100x600, 1100x650, 1366x650, 1920x950 and 960x1040.
 
+## Session 4: drones, the campaign, the command room, sun shafts, the ring course
+The player said the game felt boring and asked for the biggest jump yet: finish the phases, better graphics, drones
+and UAVs, a multi-stage theater.
+- Drones (drones.js, entities of kind 'air', live list `game.drones`): enemy recon UAV (circles; while it lives the
+  enemy fighters always know where the player is), one-way attack drones (fly low and slow at a ship and explode),
+  sea-skimming anti-ship cruise missiles, and the friendly MQ-9 Reaper (circles the target area and marks every enemy
+  ground unit it sees: orange diamonds on the HUD, `e.spotted`). `launchRaid()` sends a group at the carrier. Drones
+  are too slow for the usual radar notch gate, so a target can carry its own `notchV` (radar.js, weapons.js). The
+  escorts (ai.js ShipDefense) shoot at drones diving on the group. Sound: a 'drone' engine voice in audio.js.
+- Campaign, Operation Trident (campaign.js, menu card "Campaign", stage buttons under it): 1 Clear the sky (4
+  Flankers + spy drone), 2 Blind their radars (the 6 air defenses, Reaper overhead, the bunker left alone), 3 Hit
+  the bunker (Hammer 2-1 / 2-2, two friendly Hornets, attack the SA-15, AA guns and the airfield; an attack-drone raid
+  goes for the carrier meanwhile), 4 Sink the fleet (5 Harpoons, Spear 1-2 carries 2), 5 Hold the line (three WAVES of
+  attack drones and cruise missiles from the north; the stage is lost if the carrier sinks). Each stage builds the
+  world the way the earlier ones left it (`st.world`: defenses, HQ rubble, fleet). StageControl plugs into
+  mission.js as `M.ctl` (begin, update, targets, objectiveText, onDestroyed, grade, reportItems, teardown).
+  Progress (best grade per stage) is in localStorage 'aegis-spear-campaign'; the debrief offers NEXT: <stage>.
+  `Missions.refloat()` repairs and refloats the carrier group before every attempt (stage 5 can sink ships).
+  Honest result: flying stage 5 hands-off, the escorts alone leave the carrier at a few percent: the player has to help.
+- Command room: N opens the theater map (theater.js, briefmap.js `opts.live`): every jet, drone and ship where it is
+  now, the waves of stage 5, a side panel of who is still fighting. The autopilot holds the jet while it is open and it
+  closes by itself when a missile is fired at the player; the coach and controls cards hide under it. J cycles time
+  ×1 / ×2 / ×4; `game.timeHold()` drops back to ×1 by itself when anything needs the pilot (under 450 m, landing,
+  a missile or radar lock on the player, an enemy fighter within 30 km, drones close or closing on the ships, the
+  ring course).
+- Graphics (pipeline.js): sun shafts (a quarter-res mask of the sun glow the sky and clouds leave visible, two radial
+  blur passes), a lens flare whose strength comes from the same mask (so it fades behind clouds and terrain; off in the
+  targeting-pod pipeline, `opts.flare: false`), a colour grade (a little more saturation, cool shadows, warm
+  highlights) and a slight chromatic aberration at the screen edges. Check with `.scratch/looks.mjs sun` style shots.
+- Ring course (rings.js, menu card "Ring course", pause menu RING COURSE): no enemies, no wingman, two heat-seekers.
+  14 rings ([x, z, clearance] in COURSE) from the sea up the west of the island and back: the runway, the western
+  canyon, the mountains, the central canyon, over the city towers, the port, the sea. `layoutCourse` lifts each ring
+  above the ground under it and lifts legs until the straight line between rings clears the ground by 100 m. Next
+  ring green with a HUD circle (edge arrow when behind), the one after it orange ('ring2' marker). A ring is passed
+  when the jet crosses its plane within the radius (70 m); crossing outside is a miss and it stays the next ring.
+  Par = course length / 240 m/s (4:35); A = under par with no misses; best time in localStorage 'aegis-spear-rings'
+  (`game.ringBest`). Enter restarts; practice mode respawns just past the last ring flown. The ring tube is fattened
+  with distance in the vertex shader (`ringMaterial`), otherwise a ring is a sub-pixel sliver beyond a kilometre. The
+  test pilot (lift-vector pursuit at ~485 kt, easing off as G stress builds) finishes in about 4:08; at ~560 kt it
+  misses the canyon turns and crashes. Sustained 7.5 g blacks the pilot out after about 4 s (player.js physiology).
+
 ## Player preferences (important)
 - Beginner who wants to have fun and roleplay as a military pilot. Wants plain English on screen and to always know what to press.
 - Session 3 asked for physics tuning and polish (feel, looks, sound, screens). Don't retune the physics again unless
   asked. Ship builds fast, then let them test.
+- Session 4: "the game still feels boring", wanted much more content (drones, a campaign, the phases, graphics).
 - Don't use subagents.
 
 ## Known issues / next ideas
@@ -205,8 +254,10 @@ Web Audio, everything procedural (no asset files). Plain JS ES modules, bundled 
   few times before blaming a change. `aim.mjs` numbers also change from run to run.
 - A bolter still costs about 4.6 minutes back to the trap; a shorter go-around would need a new pattern, not just a
   smaller one (6 km / 2 km gave FAIR grades).
-- Five-phase plan agreed with the player: 1 wingman (done), 2 free play + command room (CIC map, ship orders, time
-  controls), 3 strike wing / naval strike, 4 carrier battle group, 5 extras. Phases 2-5 are on hold (after phase 1 the
-  player asked for tuning and polish instead); ask before starting one.
-- Other ideas the player picked but not built yet: night CAS, more jets (F-35C stealth, EA-18G jammer), fly-through
-  hoops for practice, a shorter go-around, night landings in rough seas.
+- Five-phase plan agreed with the player: 1 wingman (done), 2 command room (theater map and time controls done in
+  session 4; orders to the ships are not built), 3 strike wing / naval strike (done: Hammer flight, campaign stage 4),
+  4 carrier battle group (done: campaign stage 5, the escorts fight drones and missiles), 5 extras (ring course done).
+- Other ideas the player picked but not built yet: night CAS, more jets (F-35C stealth, EA-18G jammer), a shorter
+  go-around, night landings in rough seas, orders to the escort ships from the theater map.
+- `test/glsl_check.mjs` also flags the sky, terrain, ocean and navlights vertex shaders for the 'average'
+  redeclaration: the same known false positive.

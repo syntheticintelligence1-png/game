@@ -15,6 +15,7 @@ import { Player, missionLoadout } from './player.js';
 import { AIJet, SamSite, PointDefense, Flak, Tank, groundEntity, ShipDefense } from './ai.js';
 import { Helo } from './helo.js';
 import { Wingman, ORDERS } from './wingman.js';
+import { sweepDrones, droneKilled } from './drones.js';
 import { Bullets, DEFS } from '../sim/weapons.js';
 import { computeRWR } from '../sim/radar.js';
 import { FX, PT } from '../fx/fx.js';
@@ -41,6 +42,7 @@ export class Game {
     this.sensorMain = SENSOR.NORMAL; this.sensorSeeker = SENSOR.WHOT; this.tgpMode = SENSOR.WHOT;
     this.catStroke = null; this.gciSees = false; this.missileCamIdx = 0;
     this.wingman = null; this.wingMenu = false; this.wingMenuT = 0;
+    this.aiJets = []; this.drones = [];
   }
 
   async init(progress = () => { }) {
@@ -108,7 +110,7 @@ export class Game {
     this.setupScenario(this.opts.scenario || 'carrier');
     // TGP sensor pipeline
     this.tgpCam = new THREE.PerspectiveCamera(5, 1, 0.5, 200000);
-    this.tgpPipe = new Pipeline(r, 320, 320, { quality: 'low', scale: 1 });
+    this.tgpPipe = new Pipeline(r, 320, 320, { quality: 'low', scale: 1, flare: false });
     this.tgpRT = new THREE.WebGLRenderTarget(320, 320, { type: THREE.UnsignedByteType, depthBuffer: false });
     this.pipQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: this.tgpRT.texture, depthTest: false, depthWrite: false, toneMapped: false }));
     this.pipScene = new THREE.Scene(); this.pipScene.add(this.pipQuad); this.pipCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -330,10 +332,15 @@ export class Game {
       this.rig.setMode('cockpit');
     } else {
       // airborne strike start south of the island
-      // city strike: 30 km south of the city over the sea, outside the SAM envelope; dogfight: over the strait
-      const p = name === 'strike' ? new THREE.Vector3(2500, 4500, 36000) : new THREE.Vector3(2000, 4200, 33000);
-      const hdg = name === 'strike' ? 0 : 340;
-      ac.reset(p, yawQ(hdg), new THREE.Vector3(Math.sin(hdg * D2R), 0, -Math.cos(hdg * D2R)).multiplyScalar(name === 'strike' ? 230 : 240));
+      // city strike: 30 km south of the city over the sea, outside the SAM envelope; dogfight: over the strait;
+      // campaign: the stage's own start (st.dx/dz: from the carrier)
+      // ring course: before the first ring, or (practice respawn) just past the last ring flown
+      const ctl = this.mission.ctl, rs = name === 'rings' && ctl && ctl.startPoint ? ctl.startPoint() : null;
+      const st = name === 'campaign' && this.mission.stage ? this.mission.stage.start : rs ? { x: rs.pos.x, y: rs.pos.y, z: rs.pos.z, hdg: rs.hdg, v: rs.v } : null, cv = this.carrier.pos;
+      const p = st ? new THREE.Vector3(st.dx != null ? cv.x + st.dx : st.x, st.y, st.dz != null ? cv.z + st.dz : st.z)
+        : name === 'strike' ? new THREE.Vector3(2500, 4500, 36000) : new THREE.Vector3(2000, 4200, 33000);
+      const hdg = st ? st.hdg : name === 'strike' ? 0 : 340;
+      ac.reset(p, yawQ(hdg), new THREE.Vector3(Math.sin(hdg * D2R), 0, -Math.cos(hdg * D2R)).multiplyScalar(st ? st.v : name === 'strike' ? 230 : 240));
       ac.gear = 0; ac.ctl.gearCmd = 0; ac.ctl.hookCmd = 0; ac.rpm = 0.92; ac.ctl.throttle = 0.75; ops.hookAngle = 0;
       this.rig.setMode('chase');
     }
@@ -355,13 +362,13 @@ export class Game {
   }
 
   // ---------------- wingman ----------------
-  // Spear 1-2 flies every mission except landing practice: in formation when the flight starts in the air, on
-  // catapult 2 when it starts on the carrier (he launches a few seconds after the player, see onCatShot)
+  // Spear 1-2 flies every mission except landing practice and the ring course: in formation when the flight starts
+  // in the air, on catapult 2 when it starts on the carrier (he launches a few seconds after the player, see onCatShot)
   spawnWingman(scenario) {
     this.clearWingman();
-    if (this.attract || scenario === 'approach') return null;
-    const P = this.player, deck = scenario === 'carrier' || scenario === 'deck';
-    const W = new Wingman(this, { loadout: scenario === 'air' ? 'air' : 'strike', deck, pos: P.pos });
+    if (this.attract || scenario === 'approach' || scenario === 'rings') return null;
+    const P = this.player, deck = scenario === 'carrier' || scenario === 'deck', st = scenario === 'campaign' && this.mission.stage;
+    const W = new Wingman(this, { loadout: st ? st.wing : scenario === 'air' ? 'air' : 'strike', deck, pos: P.pos });
     this.world.add(W); this.aiJets.push(W); this.wingman = W;
     if (!deck) W.placeInSlot();
     this.comms.later(deck ? 3 : 4, () => { if (this.wingman === W) W.checkIn(); });
@@ -375,7 +382,7 @@ export class Game {
     this.comms.call('awacs', 'Spear 1-2 is down, good chute. SAR is launching.', `Your wingman was shot down${by}. He ejected and a rescue helicopter is on the way. You fly alone from here.`, { pri: 5, ttl: 8, say: 'Spear one-two is down, good chute. Search and rescue is launching.' });
   }
   // the menu's weapons pick, loaded the way the mission needs it
-  loadWeapons() { const P = this.player; P.applyLoadout(missionLoadout(P.loadoutName, this.mission && this.mission.kind)); }
+  loadWeapons() { const P = this.player, M = this.mission; P.applyLoadout(missionLoadout(P.loadoutName, M && M.kind, M && M.stage && M.stage.loadout)); }
   respawnOnCat() {
     const P = this.player; this.loadWeapons(); P.trails.smoke && P.trails.smoke.stop(); P.trails.smoke = null;
     this.ops.release(P.ac); this.ops.trap = null; this.setupScenario('carrier');
@@ -458,6 +465,7 @@ export class Game {
   escortShot(s, T) {
     const nm = s.name.charAt(0) + s.name.slice(1).toLowerCase(), chasing = T.isMissile && T.target === this.player;
     if (T.isMissile) this.comms.call('ship', `${CS}, ${nm}, birds away on the missile ${chasing ? 'chasing you' : 'inbound'}.`, chasing ? 'A friendly warship fired at the missile chasing you. Keep defending anyway: turn hard and drop flares (X).' : 'A friendly warship fired at an incoming enemy missile.', { from: s.name, key: 'escort', every: 10, pri: 4, ttl: 4 });
+    else if (T.isDrone) this.comms.call('ship', `${CS}, ${nm}, birds away on the ${T.type === 'cruise' ? 'vampire' : 'drone'}.`, `A friendly warship fired at an incoming ${T.type === 'cruise' ? 'anti-ship missile' : 'attack drone'}.`, { from: s.name, key: 'escort', every: 12, pri: 2, ttl: 4 });
     else this.comms.call('ship', `${CS}, ${nm}, birds away on the bandit.`, 'A friendly warship fired a missile at the enemy fighter near the fleet.', { from: s.name, key: 'escort', every: 10, pri: 3, ttl: 5 });
   }
   onEnemyLaunch(m, shooter) {
@@ -490,9 +498,16 @@ export class Game {
     const byPlayer = src === this.player || (src && src.isPlayer);
     const p = e.pos.clone();
     const byWing = !!(src && src.isWingman);
-    if (e instanceof AIJet) {
+    if (e.isDrone) {
+      e.onDestroyedVisual(); droneKilled(this, e, src, byPlayer);
+    } else if (e instanceof AIJet) {
       this.fx.explosion(p, 4.5, { surface: 'air', fuel: true }); e.onDestroyedVisual();
-      if (e.isWingman) this.wingmanLost(src);
+      if (e === this.wingman) this.wingmanLost(src);
+      else if (e.isWingman) {
+        // another friendly flight (Hammer in the campaign)
+        this.msg(src === this.player ? `FRIENDLY FIRE — YOU HIT ${e.name}` : `${e.name} WAS SHOT DOWN`, 4, '#ff9080');
+        this.comms.call('awacs', `${e.callsign} is down, good chute.`, `${e.callsign}, one of the friendly Hornets, was shot down. A rescue helicopter is on the way.`, { pri: 4, ttl: 8 });
+      }
       else if (byPlayer) { this.kills++; this.msg(`ENEMY JET DOWN — ${e.name}`, 3, '#ffe680'); this.comms.killed(e); this.audio.killConfirm(); }
       else if (byWing) src.creditKill(e);
       else if (src && src.kind === 'ship' && src.team === 'blue') {
@@ -535,6 +550,7 @@ export class Game {
   }
   playerKilled(reason) {
     const P = this.player; if (P.killed) return; P.killed = true; // (damage() may already have cleared P.alive)
+    this.timeScale = 1; this.mapOpen = false;
     const ac = P.ac, crash = ac.crashed, p = ac.s.p.clone();
     P.alive = false; P.deadT = 0; P.wreckPos = p.clone();
     P.flames.forEach(f => f.set(0, 0));
@@ -587,7 +603,7 @@ export class Game {
   }
   stop() { this.running = false; this.audio.setPaused(true); }
   enterAttract() {
-    this.attract = true; this.paused = false;
+    this.attract = true; this.paused = false; this.timeScale = 1; this.mapOpen = false;
     this.clearWingman();
     this.setupScenario('carrier'); this.msgs = []; this.comms.clear();
     for (const m of this.world.missiles.slice()) m.destroy('reset', true);
@@ -595,7 +611,7 @@ export class Game {
     this.audio.setPlayerGun(false); this.audio.setRwrLock(false); this.audio.setRwrLaunch(false); this.audio.setSeekerTone(0); this.audio.setMasterCaution(false);
   }
   launch(o) {
-    this.attract = false; this.paused = false; Object.assign(this.opts, o);
+    this.attract = false; this.paused = false; this.timeScale = 1; this.mapOpen = false; Object.assign(this.opts, o);
     if (o.hour != null && Math.abs(o.hour - this.sky.hours) > 0.01) this.setTime(o.hour);
     if (o.weather) this.setWeather(o.weather);
     for (const m of this.world.missiles.slice()) m.destroy('reset', true);
@@ -626,11 +642,15 @@ export class Game {
     if (this.paused) { this.input.endFrame(); this.render(0); return; }
     this.fps = this.fps ? this.fps * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05 : 60;
     this.handleInput(dt);
-    // fixed-step simulation
-    this.acc += dt; let n = 0;
-    while (this.acc >= DT && n < 12) { this.physics(DT); this.acc -= DT; n++; }
-    if (n >= 12) this.acc = 0;
-    this.update(dt);
+    // fixed-step simulation (J speeds it up; everything timed by the sim runs faster with it)
+    const ts = this.timeScale || 1;
+    this.acc += dt * ts; let n = 0;
+    while (this.acc >= DT && n < 12 * ts) { this.physics(DT); this.acc -= DT; n++; }
+    if (n >= 12 * ts) this.acc = 0;
+    this.update(dt * ts);
+    if (ts > 1) { const why = this.timeHold(); if (why) { this.timeScale = 1; this.msg(`NORMAL SPEED — ${why}`, 3, '#ffe680'); } }
+    // the map gets out of the way when a missile comes
+    if (this.mapOpen && (!this.player.alive || this.world.missiles.some(m => !m.dead && m.target === this.player))) { this.mapOpen = false; if (this.player.alive) this.msg('MISSILE! MAP CLOSED — FOLLOW THE BREAK CUE', 3, '#ff9080'); }
     this.render(dt);
     if (this.onFrame) this.onFrame(dt);
     this.input.endFrame();
@@ -653,12 +673,15 @@ export class Game {
       this.seekerGoneT = (this.seekerGoneT || 0) + dt;
       if (this.seekerGoneT > 1.6) { this.seekerGoneT = 0; this.rig.setMode(this.seekerReturn && this.seekerReturn !== 'seeker' ? this.seekerReturn : 'chase'); this.msg('BACK IN YOUR JET', 1.2); }
     } else this.seekerGoneT = 0;
-    if (mode !== 'seeker') { this.apAlt = null; this.apActive = false; }
+    if (mode !== 'seeker' && !this.mapOpen) { this.apAlt = null; this.apActive = false; }
+    if (I.hit('KeyN') && P.alive) { this.mapOpen = !this.mapOpen; if (this.mapOpen) this.msg('THEATER MAP — AUTOPILOT HOLDS THE JET · N = BACK', 2.5); }
+    if (I.hit('KeyJ')) this.cycleTimeScale();
     if (I.hit('F5')) this.msg('SHIP DEFENSE VIEW IS COMING IN A LATER VERSION', 2.5);
     if (I.hit('Escape') || I.hit('KeyP')) { this.togglePause(); return; }
     if (I.hit('Enter') && !P.alive) { if (this.mission && this.mission.kind) this.launch({ ...this.opts }); else this.respawnOnCat(); this.rig.setMode('chase'); return; }
     if (!P.alive) return;
     if (I.hit('Enter') && this.scenario === 'approach') { this.retryApproach(); return; }
+    if (I.hit('Enter') && this.scenario === 'rings') { this.launch({ ...this.opts }); this.msg('RING COURSE — CLOCK RESTARTED', 2); return; }
     let land = null;
     // seeker takeover steering
     if (mode === 'seeker' && this.rig.missile && !this.rig.missile.dead) {
@@ -678,6 +701,8 @@ export class Game {
       if (I.hit('KeyV')) { this.sensorSeeker = this.sensorSeeker === SENSOR.TV ? SENSOR.WHOT : this.sensorSeeker === SENSOR.WHOT ? SENSOR.BHOT : SENSOR.TV; }
       // the jet flies itself meanwhile: wings level, holds its altitude, and climbs away from terrain
       this.autopilot(dt);
+    } else if (this.mapOpen && !ac.onGround) {
+      this.assist.reset(); this.autopilot(dt);
     } else {
       const gloc = P.gloc > 0;
       const keys = { left: I.down('KeyA') || I.down('ArrowLeft'), right: I.down('KeyD') || I.down('ArrowRight'), pull: I.down('KeyS') || I.down('ArrowDown'), push: I.down('KeyW') || I.down('ArrowUp') };
@@ -761,6 +786,26 @@ export class Game {
     this.apActive = true;
   }
 
+  // J: the long legs at ×2 or ×4. Back to normal speed by itself whenever something needs the pilot (timeHold)
+  cycleTimeScale() {
+    const next = this.timeScale >= 4 ? 1 : (this.timeScale || 1) * 2;
+    if (next > 1) { const why = this.timeHold(); if (why) { this.msg(`CAN'T SPEED UP TIME NOW — ${why}`, 2.5, '#ff9080'); return; } }
+    this.timeScale = next;
+    this.msg(next > 1 ? `TIME ×${next} — PRESS J ${next === 4 ? 'FOR NORMAL SPEED' : 'AGAIN FOR ×4'}` : 'NORMAL SPEED', 2);
+  }
+  // why time has to run at normal speed now (null: it may run faster)
+  timeHold() {
+    const P = this.player, ac = P.ac, p = ac.s.p;
+    if (!P.alive || this.attract) return 'NOT FLYING';
+    if (this.mission && this.mission.kind === 'rings' && !this.mission.ended) return 'RACING THE CLOCK';
+    if (ac.onGround || this.ops.inApproach || ac.ctl.gearCmd) return 'LANDING';
+    if (p.y - Math.max(this.terrain.heightAt(p.x, p.z), 0) < 450) return 'TOO LOW';
+    if (this.world.missiles.some(m => !m.dead && m.target === P)) return 'MISSILE INBOUND';
+    if (P.rwr && P.rwr.some(e => e.level === 'lock' || e.level === 'launch')) return 'AN ENEMY RADAR IS LOCKED ON YOU';
+    for (const j of this.aiJets) if (j.alive && j.team === 'red' && j.pos.distanceTo(p) < 30000) return 'ENEMY FIGHTER CLOSE';
+    for (const d of this.drones) if (d.alive && d.team === 'red' && (d.pos.distanceTo(p) < 12000 || (d.target && d.pos.distanceTo(this.carrier.pos) < 16000))) return d.target ? 'ENEMY DRONES CLOSING ON THE SHIPS' : 'ENEMY DRONE CLOSE';
+    return null;
+  }
   togglePause(force) {
     if (this.attract) return;
     this.paused = force != null ? force : !this.paused;
@@ -794,6 +839,7 @@ export class Game {
       if (ac.nz > 12.5 && !this.opts.invulnerable) { P.damage(ac.nz > 14 ? 100 : 2, null); this.msg('JET OVERSTRESSED — TOO MANY G', 1.5, '#ff8080'); }
     }
     for (const j of this.aiJets) j.update(dt);
+    for (const d of this.drones) d.update(dt);
     for (const m of this.world.missiles.slice()) m.update(dt);
     this.bulletTick = !this.bulletTick; if (this.bulletTick) this.bullets.update(dt * 2);
   }
@@ -805,6 +851,8 @@ export class Game {
     updateLights(GU.uNight.value, innerHeight * this.renderer.getPixelRatio());
     GU.uWind.value.x += -this.wind.x * dt * 1.4; GU.uWind.value.y += -this.wind.z * dt * 1.4; // cloud drift with the wind
     this.gciSees = false;
+    for (const d of this.drones) d.sense(dt);
+    sweepDrones(this);
     for (const s of this.sams) s.update(dt);
     for (const p of this.pointDef) p.update(dt);
     for (const f of this.flak) f.update(dt);
@@ -1023,7 +1071,7 @@ export class Game {
       else S.showHud = false;
     }
     S.markers = this.buildMarkers();
-    S.banner = this.opts.realistic ? null : this.landAssist.status(this);
+    S.banner = (this.opts.realistic ? null : this.landAssist.status(this)) || (this.timeScale > 1 ? { text: `TIME ×${this.timeScale} · J = ${this.timeScale === 4 ? 'NORMAL SPEED' : '×4'}`, color: '#ffe680' } : null);
     S.threat = this.threatInfo();
     S.detect = P.detect; S.ap = this.apActive;
     this.hud.draw(S, cam);
@@ -1088,17 +1136,20 @@ export class Game {
       if (e.team === 'red') {
         const isObj = !!(objs && objs.has(e));
         if (isObj && d < nd) { nd = d; nearestObj = e; }
-        if (e.kind === 'air') out.push({ pos: e.pos, kind: 'air', label: e.name, d, r: 9, lock: e === lock, tone: e === tone, arrow: d < 120000 });
+        // drones: a swarm would fill the screen edge with arrows, so only the near ones (and the spy drone) get one
+        if (e.kind === 'air') out.push({ pos: e.pos, kind: e.isDrone ? 'drone' : 'air', label: e.name, d, r: e.isDrone ? 4 : 9, lock: e === lock, tone: e === tone, arrow: e.isDrone ? d < 25000 || e.type === 'recon' : d < 120000 });
         else if (e.kind === 'ship') { if (d < 80000) out.push({ pos: e.pos, kind: isObj ? 'objective' : 'ship', label: tagOf(e), d, r: e.radius, lock: e === marked, arrow: isObj && d > 3000 }); }
         else if (isObj || e === marked) { if (d < 45000) out.push({ pos: e.pos, kind: 'objective', label: tagOf(e), d, r: e.radius, lock: e === marked, obj: isObj }); }
+        else if (e.spotted && e.targetable && d < 80000) out.push({ pos: e.pos, kind: d < 12000 ? 'ground' : 'spotted', label: tagOf(e), d, r: e.radius });
         else if (d < 12000 && e.targetable) out.push({ pos: e.pos, kind: 'ground', label: d < 6000 ? tagOf(e) : '', d, r: e.radius });
-      }
+      } else if (e.isDrone && e.team === 'blue' && d > 1500) out.push({ pos: e.pos, kind: 'friendly', label: e.name, d, r: 9 });
     }
     if (nearestObj && nd > 2500) { const m = out.find(o => o.pos === nearestObj.pos); if (m) m.arrow = true; }
     // the wingman: a blue chevron once he's away from the formation (on your wing you can see him)
     const W = this.wingman;
     if (W && W.alive && !W.deck) { const d = W.pos.distanceTo(s.p); if (d > 400) out.push({ pos: W.pos, kind: 'friendly', label: 'SPEAR 1-2', d, r: 9 }); }
     for (const m of this.world.missiles) if (!m.dead && m.team !== 'blue' && m.target === P) out.push({ pos: m.pos, kind: 'missile', label: 'MISSILE', d: m.pos.distanceTo(s.p), r: 2, arrow: true });
+    const ctl = this.mission && this.mission.ctl; if (ctl && ctl.markers) ctl.markers(out, s.p);
     const cv = this.carrier; if (cv.alive !== false) {
       const d = cv.root.position.distanceTo(s.p); const home = this.ops.inApproach || P.ac.ctl.gearCmd || P.ac.fuel < 0.2 * 6560 || (this.mission && this.mission.state === 'rtb');
       const LA = this.landAssist, easy = !this.opts.realistic;

@@ -147,7 +147,7 @@ export class Radio {
       } else if (G.rng < 75000 && G.rng > 14000 && g.time - (this.last.picture ?? -1e9) > 50 && (g.mission.kind === 'dogfight' || g.mission.tasked)) this.picture();
     }
     const M = g.mission;
-    if (M.kind === 'strike' && (M.state === 'sead' || M.state === 'strike')) for (const z of M.threatRings ? M.threatRings() : []) {
+    if ((M.kind === 'strike' && (M.state === 'sead' || M.state === 'strike')) || M.kind === 'naval') for (const z of M.threatRings ? M.threatRings() : []) {
       if (!z.alive || this.last['ring-' + z.id] != null) continue;
       if (Math.hypot(P.pos.x - z.x, P.pos.z - z.z) < z.r) this.call('awacs', z.text, z.plain, { key: 'ring-' + z.id, every: 1e9, pri: 2, ttl: 8, say: z.say });
     }
@@ -159,7 +159,9 @@ export class Radio {
     if (e.kind === 'air') {
       this.call('pilot', 'Splash one!', '', { pri: 3, ttl: 4, dur: 2.6, say: 'Splash one!' });
       const left = g.aiJets.filter(j => j.alive && j.team === 'red').length;
+      const drones = (g.drones || []).filter(d => d.alive && d.team === 'red').length;
       if (left) this.call('awacs', `Magic copies, splash one. ${cap(NUMW[left] || String(left))} bandit${left > 1 ? 's' : ''} remaining.`, `Enemy fighter shot down. ${left} left.`, { pri: 2, ttl: 8 });
+      else if (drones) this.call('awacs', 'Magic copies, splash. No more fighters, the drone is still up.', `Enemy fighter shot down. That was the last fighter; ${drones} enemy drone${drones > 1 ? 's are' : ' is'} still flying.`, { pri: 2, ttl: 8 });
       else this.call('awacs', 'Magic copies, splash. Picture clean.', 'Enemy fighter shot down. The sky is clear.', { pri: 2, ttl: 8 });
     } else if (e.kind === 'ship') {
       this.call('awacs', `Good hits, Spear. ${tagOf(e) === 'ENEMY DESTROYER' ? 'The destroyer' : 'A frigate'} is burning and dead in the water.`, 'Enemy warship destroyed.', { pri: 2, ttl: 8, key: 'ship', every: 4 });

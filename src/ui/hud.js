@@ -105,11 +105,11 @@ export class HUD {
   // target markers: boxes on enemy jets, diamonds on mission targets, edge arrows for things off-screen
   drawMarkers(list, cam) {
     const c = this.ctx, s = this.s, W = this.W, H = this.H;
-    const COL = { air: '#ff5a4f', objective: '#ffb03b', ground: '#ff8a6b', ship: '#ff6f5e', missile: '#ff2a2a', friendly: '#7fd0ff', join: '#7dffb0', spot: '#7dffb0' };
+    const COL = { air: '#ff5a4f', drone: '#ff9a4d', objective: '#ffb03b', ground: '#ff8a6b', spotted: '#ffa54a', ship: '#ff6f5e', missile: '#ff2a2a', friendly: '#7fd0ff', join: '#7dffb0', spot: '#7dffb0', ring2: '#ffb347' };
     const fmt = (d) => d < 1000 ? `${Math.round(d / 10) * 10} m` : d < 20000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d / 1000)} km`;
     const flash = (this.t * 4) % 1 < 0.55;
     const tanHalf = Math.tan(cam.fov * Math.PI / 360);
-    const PRI = { missile: 1, objective: 2, join: 2.5, spot: 2.5, air: 3, ship: 4, ground: 5, friendly: 6 };
+    const PRI = { missile: 1, objective: 2, join: 2.5, spot: 2.5, ring2: 2.7, air: 3, drone: 3.2, ship: 4, ground: 5, spotted: 5.5, friendly: 6 };
     const labels = [];
     c.save(); c.lineJoin = 'round'; c.textBaseline = 'middle';
     for (const m of list) {
@@ -127,15 +127,17 @@ export class HUD {
         if (m.kind === 'air') {
           const k = px * 0.45; // corner brackets
           for (const [ax, ay] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { c.moveTo(sx + ax * px, sy + ay * (px - k)); c.lineTo(sx + ax * px, sy + ay * px); c.lineTo(sx + ax * (px - k), sy + ay * px); }
-        } else if (m.kind === 'missile') { c.arc(sx, sy, 10 * s, 0, Math.PI * 2); c.moveTo(sx - 6 * s, sy - 6 * s); c.lineTo(sx + 6 * s, sy + 6 * s); c.moveTo(sx + 6 * s, sy - 6 * s); c.lineTo(sx - 6 * s, sy + 6 * s); }
+        } else if (m.kind === 'drone') { const r = Math.max(7 * s, px * 0.8); c.moveTo(sx - r, sy - r * 0.6); c.lineTo(sx + r, sy - r * 0.6); c.lineTo(sx, sy + r); c.closePath(); }
+        else if (m.kind === 'missile') { c.arc(sx, sy, 10 * s, 0, Math.PI * 2); c.moveTo(sx - 6 * s, sy - 6 * s); c.lineTo(sx + 6 * s, sy + 6 * s); c.moveTo(sx + 6 * s, sy - 6 * s); c.lineTo(sx - 6 * s, sy + 6 * s); }
         else if (m.kind === 'friendly') { c.moveTo(sx - 9 * s, sy - 6 * s); c.lineTo(sx, sy + 4 * s); c.lineTo(sx + 9 * s, sy - 6 * s); }
-        else if (m.kind === 'join') { const r = 13 * s; c.arc(sx, sy, r, 0, Math.PI * 2); c.moveTo(sx + 2.5 * s, sy); c.arc(sx, sy, 2.5 * s, 0, Math.PI * 2); }
+        else if (m.kind === 'join') { const r = m.r >= 60 ? Math.max(13 * s, px * 0.9) : 13 * s; c.arc(sx, sy, r, 0, Math.PI * 2); c.moveTo(sx + 2.5 * s, sy); c.arc(sx, sy, 2.5 * s, 0, Math.PI * 2); }
+        else if (m.kind === 'ring2') { const r = Math.max(9 * s, px * 0.9); c.setLineDash([4 * s, 4 * s]); c.arc(sx, sy, r, 0, Math.PI * 2); c.stroke(); c.setLineDash([]); c.beginPath(); }
         else if (m.kind === 'spot') { const w = Math.max(12 * s, px * 0.9), h = Math.max(4 * s, w * 0.3); c.rect(sx - w, sy - h, 2 * w, 2 * h); c.moveTo(sx - w * 0.4, sy); c.lineTo(sx + w * 0.4, sy); }
         else if (m.kind === 'ground') { const r = 5 * s; c.moveTo(sx, sy - r); c.lineTo(sx + r, sy); c.lineTo(sx, sy + r); c.lineTo(sx - r, sy); c.closePath(); }
         else { const r = Math.max(9 * s, px * 0.8); c.moveTo(sx, sy - r); c.lineTo(sx + r, sy); c.lineTo(sx, sy + r); c.lineTo(sx - r, sy); c.closePath(); if (m.kind === 'objective' && flash) { c.moveTo(sx + 2.5 * s, sy); c.arc(sx, sy, 2.5 * s, 0, Math.PI * 2); } }
         c.stroke();
         if (m.lock) { const r = px + 7 * s; c.beginPath(); c.moveTo(sx, sy - r); c.lineTo(sx + r, sy); c.lineTo(sx, sy + r); c.lineTo(sx - r, sy); c.closePath(); c.stroke(); }
-        const label = m.label ? `${m.lock ? (m.kind === 'air' ? 'LOCKED ' : 'MARKED ') : m.tone ? 'TONE ' : ''}${m.label}` : '';
+        const label = m.label ? `${m.lock ? (m.kind === 'air' || m.kind === 'drone' ? 'LOCKED ' : 'MARKED ') : m.tone ? 'TONE ' : ''}${m.label}` : '';
         if (label || m.kind !== 'ground') labels.push({ m, x: sx, y: sy + Math.max(px, 9 * s) + 10 * s, col, label, dist: fmt(m.d), pri: m.lock ? 0 : PRI[m.kind] ?? 7 });
       } else if (m.arrow) {
         // edge arrow toward the target (works for things behind the camera too)

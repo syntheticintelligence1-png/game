@@ -61,7 +61,8 @@ export class Radar {
     if (R > maxR) return false;
     if (tgt.pos.y - Math.max(world.game.terrain.heightAt(tgt.pos.x, tgt.pos.z), 0) < this.minAlt) return false;
     if (!this.inCoverage(tgt.pos)) return false;
-    if (inNotch(world.game.terrain, rp, tgt.pos, tgt.vel, this.notchV)) return false;
+    // a target can carry its own (narrower) gate: drones are too slow for the usual one (see drones.js)
+    if (inNotch(world.game.terrain, rp, tgt.pos, tgt.vel, Math.min(this.notchV, tgt.notchV ?? Infinity))) return false;
     if (!world.game.terrain.lineOfSight(rp, tgt.pos, true, 2)) return false;
     return true;
   }
@@ -146,7 +147,7 @@ export class PlayerRadar {
     if (R > maxR) return false;
     const f = p.ac.forward(_v); const d = _v2.copy(e.pos).sub(p.pos).normalize();
     if (f.dot(d) < Math.cos(this.azHalf)) return false;
-    if (inNotch(this.game.terrain, p.pos, e.pos, e.vel)) return false;
+    if (inNotch(this.game.terrain, p.pos, e.pos, e.vel, e.notchV ?? NOTCH_V)) return false;
     return this.game.terrain.lineOfSight(p.pos, e.pos, true, 2);
   }
   update(world, p, dt) {
