@@ -23,7 +23,7 @@ renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadow
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 const t0 = performance.now();
-initCloudTextures();
+initCloudTextures(renderer);
 const tCl = performance.now();
 const scene = new THREE.Scene();
 const fx = new THREE.Scene();
@@ -35,7 +35,7 @@ terrain.generate();
 const tTer = performance.now();
 terrain.build(renderer);
 scene.add(terrain.group);
-const ocean = new Ocean(terrain);
+const ocean = new Ocean(terrain, renderer);
 ocean.setShoreTexture(terrain.nTex);
 scene.add(ocean.mesh);
 const carrier = buildCarrier();
@@ -76,6 +76,7 @@ function frame() {
   ocean.update(camera.position, [{ pos: carrier.root.position, fwd: new THREE.Vector3(-1,0,0), speed: 13, length: 333, beam: 41, alive: true }, { pos: dd.root.position, fwd: new THREE.Vector3(-1,0,0), speed: 13, length: 155, beam: 20, alive: true }]);
   sky.followCamera(camera, params.get('cockpit') || params.get('jetcam') ? jet.root.position : camera.position);
   sky.update(camera.position, frames);
+  pipe.refl = { hide: [ocean.mesh], dome: sky.dome, terrain };
   pipe.render(scene, fx, camera, { mode: 0, exposure: sky.exposure });
   frames++;
   window.__frames = frames;

@@ -24,7 +24,6 @@ vec3 atmosphere(vec3 ro, vec3 rd, vec3 sd, float sunI) {
   float tmax = pa.y;
   if (pg.x < pg.y && pg.x > 0.0) tmax = min(tmax, pg.x);
   const int NS = 20; const int NL = 8;
-  float ds = (tmax - tmin) / float(NS);
   vec3 sumR = vec3(0.0), sumM = vec3(0.0);
   float odR = 0.0, odM = 0.0;
   float mu = dot(rd, sd);
@@ -32,7 +31,11 @@ vec3 atmosphere(vec3 ro, vec3 rd, vec3 sd, float sunI) {
   float g = 0.76;
   float phM = 3.0 / (8.0 * PI) * ((1.0 - g * g) * (1.0 + mu * mu)) / ((2.0 + g * g) * pow(1.0 + g * g - 2.0 * g * mu, 1.5));
   for (int i = 0; i < NS; i++) {
-    vec3 pos = ro + rd * (tmin + (float(i) + 0.5) * ds);
+    // steps grow with the cube of the distance: a level ray crosses ~1000 km of air but the dense, hazy part is
+    // the first few dozen km, and even steps there drew a dark brown band along the horizon
+    float u0 = float(i) / float(NS), u1 = float(i + 1) / float(NS), um = 0.5 * (u0 + u1);
+    float ds = (tmax - tmin) * (u1 * u1 * u1 - u0 * u0 * u0);
+    vec3 pos = ro + rd * (tmin + (tmax - tmin) * um * um * um);
     float h = length(pos) - Re;
     float hr = exp(-h / HR) * ds; float hm = exp(-h / HM) * ds;
     odR += hr; odM += hm;
@@ -80,13 +83,15 @@ function atmoJS(alt, rd, sd, sunI) {
   const pa = raySphere(ro, rd, Ra); if (pa[0] > pa[1]) return [0, 0, 0];
   const pg = raySphere(ro, rd, Re);
   const tmin = Math.max(pa[0], 0); let tmax = pa[1]; if (pg[0] < pg[1] && pg[0] > 0) tmax = Math.min(tmax, pg[0]);
-  const NS = 12, NL = 6; const ds = (tmax - tmin) / NS;
+  const NS = 16, NL = 6;
   const mu = rd[0] * sd[0] + rd[1] * sd[1] + rd[2] * sd[2];
   const phR = 3 / (16 * Math.PI) * (1 + mu * mu), g = 0.76;
   const phM = 3 / (8 * Math.PI) * ((1 - g * g) * (1 + mu * mu)) / ((2 + g * g) * Math.pow(1 + g * g - 2 * g * mu, 1.5));
   let odR = 0, odM = 0; const sR = [0, 0, 0]; let sM = [0, 0, 0];
   for (let i = 0; i < NS; i++) {
-    const t = tmin + (i + 0.5) * ds; const p = [ro[0] + rd[0] * t, ro[1] + rd[1] * t, ro[2] + rd[2] * t];
+    // cubic step spacing, as in the GLSL
+    const u0 = i / NS, u1 = (i + 1) / NS, um = (u0 + u1) / 2, ds = (tmax - tmin) * (u1 ** 3 - u0 ** 3);
+    const t = tmin + (tmax - tmin) * um ** 3; const p = [ro[0] + rd[0] * t, ro[1] + rd[1] * t, ro[2] + rd[2] * t];
     const h = Math.hypot(p[0], p[1], p[2]) - Re; const hr = Math.exp(-h / HR) * ds, hm = Math.exp(-h / HM) * ds;
     odR += hr; odM += hm;
     const plg = raySphere(p, sd, Re); if (plg[0] < plg[1] && plg[0] > 0) continue;
@@ -115,26 +120,49 @@ export class Sky {
     this.rt.texture.wrapS = THREE.RepeatWrapping;
     this.rt.texture.mapping = THREE.EquirectangularReflectionMapping;
     GU.uSkyTex.value = this.rt.texture;
+    // uEnvMode 0: the sky texture (dome, haze). Rays below the horizon take the horizon's colour: they would hit
+    // the ground a few km away, and blending those dark rows into the horizon drew a brown band along it.
+    // uEnvMode 1: the environment map for lit materials: the sky greyed by the cloud cover above, the sea (the sky
+    // it reflects, by Fresnel, over the dark water body) below.
     this.genMat = new THREE.ShaderMaterial({
-      uniforms: { uSunDirGen: { value: new THREE.Vector3() }, uAlt: { value: 0 }, uSunI: { value: SUN_I }, uNightSky: { value: 0 } },
+      uniforms: { uSunDirGen: { value: new THREE.Vector3() }, uAlt: { value: 0 }, uSunI: { value: SUN_I }, uNightSky: { value: 0 }, uEnvMode: { value: 0 }, uOvercast: { value: 0 } },
       vertexShader: FULLSCREEN_VS,
       fragmentShader: /* glsl */`
         #define PI 3.14159265359
-        uniform vec3 uSunDirGen; uniform float uAlt; uniform float uSunI; uniform float uNightSky;
+        uniform vec3 uSunDirGen; uniform float uAlt; uniform float uSunI; uniform float uNightSky; uniform float uEnvMode; uniform float uOvercast;
         varying vec2 vUv;
         ${ATMO_GLSL}
+        vec3 skyAt(vec3 ro, vec3 rd, float grey) {
+          vec3 c = atmosphere(ro, rd, uSunDirGen, uSunI);
+          c += vec3(0.004, 0.006, 0.012) * (0.4 + 0.6 * smoothstep(-0.1, 0.4, rd.y)) * uNightSky; // moonlit / airglow floor
+          float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+          return mix(c, vec3(l) * vec3(0.97, 1.0, 1.04), grey);
+        }
         void main() {
           float phi = (vUv.x - 0.5) * 2.0 * PI; float th = (vUv.y - 0.5) * PI;
           vec3 rd = vec3(sin(phi) * cos(th), sin(th), -cos(phi) * cos(th));
           vec3 ro = vec3(0.0, Re + max(uAlt, 2.0), 0.0);
-          vec3 col = atmosphere(ro, rd, uSunDirGen, uSunI);
-          // moonlit / airglow floor so night is not pitch black
-          vec3 night = vec3(0.004, 0.006, 0.012) * (0.4 + 0.6 * smoothstep(-0.1, 0.4, rd.y)) * uNightSky;
-          col += night;
+          vec3 col;
+          if (uEnvMode < 0.5) {
+            vec3 d = rd; if (d.y < 0.0) d = normalize(vec3(d.x, 0.0, d.z));
+            col = skyAt(ro, d, uOvercast * 0.45 * smoothstep(0.5, 0.0, d.y));
+          } else if (rd.y >= 0.0) {
+            col = skyAt(ro, rd, uOvercast * 0.85) * (1.0 - uOvercast * 0.35);
+          } else {
+            vec3 r = vec3(rd.x, -rd.y, rd.z);
+            float F = 0.02 + 0.98 * pow(1.0 - r.y, 5.0);
+            vec3 body = vec3(0.002, 0.009, 0.016) * uSunI * max(uSunDirGen.y, 0.0) * 0.35;
+            col = skyAt(ro, r, uOvercast * 0.85) * (1.0 - uOvercast * 0.35) * F + body * (1.0 - F);
+          }
           gl_FragColor = vec4(col, 1.0);
         }`,
       depthTest: false, depthWrite: false,
     });
+    this.envSrc = new THREE.WebGLRenderTarget(256, 128, {
+      type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: false,
+    });
+    this.envSrc.texture.mapping = THREE.EquirectangularReflectionMapping;
+    this.overcast = 0;
     this.quad = new THREE.Mesh(fullscreenTriangle(), this.genMat);
     this.quad.frustumCulled = false;
     this.quadScene = new THREE.Scene(); this.quadScene.add(this.quad);
@@ -142,7 +170,7 @@ export class Sky {
 
     // Sky dome
     const domeMat = new THREE.ShaderMaterial({
-      uniforms: { ...pickGU() },
+      uniforms: { ...pickGU(), uSunDisk: { value: 1 } },
       vertexShader: /* glsl */`
         #include <common>
         #include <logdepthbuf_pars_vertex>
@@ -155,6 +183,7 @@ export class Sky {
       fragmentShader: /* glsl */`
         ${GLSL_COMMON}
         #include <logdepthbuf_pars_fragment>
+        uniform float uSunDisk;
         varying vec3 vDir;
         void main() {
           #include <logdepthbuf_fragment>
@@ -165,7 +194,7 @@ export class Sky {
           float mu = dot(d, uSunDir);
           float r = 0.0095;
           float c = 1.0 - mu;
-          float disk = 1.0 - smoothstep(r * r * 0.5 * 0.8, r * r * 0.5, c);
+          float disk = (1.0 - smoothstep(r * r * 0.5 * 0.8, r * r * 0.5, c)) * uSunDisk;
           if (disk > 0.0) {
             float x = clamp(c / (r * r * 0.5), 0.0, 1.0);
             float limb = 0.55 + 0.45 * sqrt(1.0 - x);
@@ -231,9 +260,8 @@ export class Sky {
     this.dirty = false; this.lastAlt = alt; this.lastSun.copy(sd);
     const night = THREE.MathUtils.clamp((-sd.y - 0.0) / 0.12, 0, 1);
     GU.uNight.value = night;
-    this.genMat.uniforms.uSunDirGen.value.copy(sd);
-    this.genMat.uniforms.uAlt.value = alt;
-    this.genMat.uniforms.uNightSky.value = night;
+    const gu = this.genMat.uniforms;
+    gu.uSunDirGen.value.copy(sd); gu.uAlt.value = alt; gu.uNightSky.value = night; gu.uEnvMode.value = 0; gu.uOvercast.value = this.overcast;
     const r = this.renderer; const prev = r.getRenderTarget();
     r.setRenderTarget(this.rt); r.render(this.quadScene, this.quadCam); r.setRenderTarget(prev);
 
@@ -251,18 +279,25 @@ export class Sky {
     }
     const nightAmb = 0.015 * night;
     GU.uSkyAmb.value.set(acc[0] / n + nightAmb * 0.6, acc[1] / n + nightAmb * 0.8, acc[2] / n + nightAmb * 1.3);
+    // under a cloud deck the light from the sky turns grey and a little dimmer
+    const oc = this.overcast;
+    if (oc > 0) {
+      const a = GU.uSkyAmb.value, l = a.x * 0.2126 + a.y * 0.7152 + a.z * 0.0722, k = 0.8 * oc;
+      a.set(a.x + (l * 0.96 - a.x) * k, a.y + (l - a.y) * k, a.z + (l * 1.05 - a.z) * k).multiplyScalar(1 - 0.3 * oc);
+    }
     const gA = GU.uSkyAmb.value.clone().multiplyScalar(0.25).add(new THREE.Vector3(...GU.uSunColor.value.toArray()).multiplyScalar(0.012 * Math.max(sd.y, 0)));
     GU.uGroundAmb.value.copy(gA);
 
     // directional light: sun by day, moon by night
+    // (the game scales sunLight.intensity down from sunI in cloud shadow)
     if (this.isNight) {
       this.sunLight.color.setRGB(0.55, 0.65, 0.9);
-      this.sunLight.intensity = 0.08;
+      this.sunI = this.sunLight.intensity = 0.08;
       this.lightDir = this.moonDir;
     } else {
       const sc = GU.uSunColor.value; const m = Math.max(sc.x, sc.y, sc.z, 1e-6);
       this.sunLight.color.setRGB(sc.x / m, sc.y / m, sc.z / m);
-      this.sunLight.intensity = m;
+      this.sunI = this.sunLight.intensity = m;
       this.lightDir = sd;
     }
     // exposure: daylight vs dusk vs night
@@ -271,9 +306,16 @@ export class Sky {
     return true;
   }
 
+  // how grey the sky reads (0 clear .. 1 overcast); takes effect at the next update / updateEnv
+  setOvercast(k) { if (Math.abs(k - this.overcast) > 1e-3) { this.overcast = k; this.dirty = true; } }
+
   updateEnv() {
-    if (this.envRT) this.envRT.dispose();
-    this.envRT = this.pmrem.fromEquirectangular(this.rt.texture);
+    const gu = this.genMat.uniforms, r = this.renderer, prev = r.getRenderTarget();
+    gu.uSunDirGen.value.copy(GU.uSunDir.value); gu.uAlt.value = Math.min(Math.max(this.lastAlt, 2), 3000);
+    gu.uEnvMode.value = 1; gu.uOvercast.value = this.overcast;
+    r.setRenderTarget(this.envSrc); r.render(this.quadScene, this.quadCam); r.setRenderTarget(prev);
+    gu.uEnvMode.value = 0;
+    this.envRT = this.pmrem.fromEquirectangular(this.envSrc.texture, this.envRT || null);
     return this.envRT.texture;
   }
 

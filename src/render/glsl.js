@@ -11,13 +11,19 @@ export const GU = {
   uFogDensity: { value: 5.0e-5 },
   uFogHeight: { value: 2600 },
   uNoiseTex: { value: null },     // 256^2 RGBA tileable noise
-  uWeatherTex: { value: null },   // cloud coverage map
-  uNoise3D: { value: null },      // 64^3 Perlin-Worley
-  uCloudBase: { value: 1700 },
-  uCloudTop: { value: 3300 },
-  uCloudCover: { value: 0.55 },
-  uWeatherScale: { value: 60000 },
+  uWeatherTex: { value: null },   // cloud weather map: r how cloudy, g cloud type, b darker cores
+  uNoise3D: { value: null },      // 128^3 cloud shape: r Perlin-Worley, gba Worley fbm
+  uNoiseDetail: { value: null },  // 32^3 cloud edge erosion: rgb Worley fbm
+  uCloudBase: { value: 1400 },
+  uCloudTop: { value: 4600 },
+  uCloudCover: { value: 0.45 },
+  uCloudDensity: { value: 1.0 },
+  uWeatherScale: { value: 48000 },
   uWind: { value: new THREE.Vector2(0, 0) },
+  // planar reflection of the world above the water, made by Pipeline for the ocean
+  uReflTex: { value: null },
+  uReflMat: { value: new THREE.Matrix4() },
+  uReflOn: { value: 0 },
   uThermal: { value: 0 },
   uNight: { value: 0 },
   uLightPos: { value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] },
@@ -76,54 +82,78 @@ float fogTransmittance(vec3 ro, vec3 rd, float dist) {
 }
 `;
 
+// Cloud density model (after Schneider's Nubis talks): a weather map says how likely cloud is and how tall it grows,
+// a Perlin-Worley volume gives each cloud its billowing shape and a small Worley volume erodes the edges into wisps
+// near the base and cauliflower curls near the top. cloudBulkCPU in clouds.js is the CPU copy: keep them in step.
 export const GLSL_CLOUDS = /* glsl */`
 uniform sampler2D uWeatherTex;
 uniform highp sampler3D uNoise3D;
+uniform highp sampler3D uNoiseDetail;
 uniform float uCloudBase;
 uniform float uCloudTop;
 uniform float uCloudCover;
+uniform float uCloudDensity;
 uniform float uWeatherScale;
 uniform vec2 uWind;
+#define CLOUD_SHAPE_SCALE 7600.0
+#define CLOUD_DETAIL_SCALE 560.0
+#define CLOUD_SIGMA 0.07
 
 float remap(float v, float lo, float hi, float nlo, float nhi) { return nlo + (v - lo) * (nhi - nlo) / (hi - lo); }
-
-// coverage-only density used for shadows and cheap light marching
-float cloudDensityLo(vec3 p) {
-  float h = (p.y - uCloudBase) / (uCloudTop - uCloudBase);
-  if (h <= 0.0 || h >= 1.0) return 0.0;
-  vec2 wp = p.xz + uWind;
-  vec4 w = texture(uWeatherTex, wp / uWeatherScale);
-  float cov = clamp(w.r * uCloudCover * 1.25, 0.0, 1.0);
-  if (cov < 0.02) return 0.0;
-  float top = mix(0.45, 1.0, w.g);
-  float grad = smoothstep(0.0, 0.1, h) * smoothstep(top, top * 0.55, h);
-  vec4 n = texture(uNoise3D, vec3(wp.x, p.y * 1.6, wp.y) * 0.00019);
-  float fbm = n.g * 0.625 + n.b * 0.25 + n.a * 0.125;
-  float base = remap(n.r, -(1.0 - fbm), 1.0, 0.0, 1.0);
-  base = clamp(base * grad, 0.0, 1.0);
-  float c = clamp(remap(base, 1.0 - cov, 1.0, 0.0, 1.0), 0.0, 1.0) * cov;
-  return c;
+// the share of this column that is cloud for the current weather. Weather r is spread evenly over 0..1 and the
+// ramp is gentle, so the shape noise rather than the map's outline gives each cloud its form (a steep ramp drew
+// the map's texels as vertical flutes down the cloud walls)
+float cloudCoverage(float r) { return clamp(uCloudCover + (r - 0.5) * 1.3 * min(uCloudCover * 4.0, 1.0), 0.0, 1.0); }
+// vertical profile: a flat base that thickens quickly, a rounded top whose height depends on the cloud type
+float cloudProfile(float h, float type) {
+  float top = mix(0.3, 1.0, type);
+  return smoothstep(0.0, 0.1, h) * (1.0 - smoothstep(top * 0.3, top, h));
 }
-float cloudDensityHi(vec3 p, float lod) {
-  float c = cloudDensityLo(p);
-  if (c <= 0.0) return 0.0;
-  float h = (p.y - uCloudBase) / (uCloudTop - uCloudBase);
-  vec2 wp = p.xz + uWind * 1.3;
-  vec4 d = textureLod(uNoise3D, vec3(wp.x, p.y, wp.y) * 0.0021 + vec3(0.0, uTime * 0.004, 0.0), lod);
-  float dfbm = d.g * 0.625 + d.b * 0.25 + d.a * 0.125;
-  float eros = mix(dfbm, 1.0 - dfbm, clamp(h * 4.0, 0.0, 1.0));
-  return clamp(remap(c, eros * 0.32, 1.0, 0.0, 1.0), 0.0, 1.0);
+// the cloud's bulk shape (no edge detail); hf = height fraction in the layer. The baked shape noise is spread over
+// 0..1, and only what pokes above the coverage threshold is cloud.
+float cloudShape(vec3 p, float lod, out float hf) {
+  hf = (p.y - uCloudBase) / (uCloudTop - uCloudBase);
+  if (hf <= 0.0 || hf >= 1.0) return 0.0;
+  vec2 q = p.xz + uWind;
+  vec4 w = textureLod(uWeatherTex, q / uWeatherScale, 0.0);
+  float cov = cloudCoverage(w.r);
+  if (cov <= 0.001) return 0.0;
+  if (cloudProfile(hf, w.g) <= 0.0) return 0.0;
+  float n = textureLod(uNoise3D, vec3(q.x, p.y, q.y) / CLOUD_SHAPE_SCALE, lod).r;
+  // the thin outskirts of a cloud start higher and end lower than its core: rounded bellies and domes
+  float prof = cloudProfile(hf - (1.0 - n) * 0.1, w.g);
+  return max(n * prof - (1.0 - cov), 0.0) * (0.75 + 0.5 * w.b);
 }
-// sun shadow cast by the cloud deck onto a surface point
+// the shape eaten away at the edges by the detail volume
+float cloudErode(vec3 p, float base, float hf, float lod) {
+  vec3 q = vec3(p.x + uWind.x * 1.12, p.y - uTime * 0.8, p.z + uWind.y * 1.12) / CLOUD_DETAIL_SCALE;
+  vec3 d = textureLod(uNoiseDetail, q, lod).rgb;
+  float hfbm = dot(d, vec3(0.5, 0.3, 0.2));
+  float m = mix(hfbm, 1.0 - hfbm, clamp(hf * 5.0, 0.0, 1.0));
+  // eaten deeper near the base: ragged undersides instead of one smooth grey ceiling
+  float e = m * mix(0.45, 0.3, smoothstep(0.0, 0.25, hf));
+  return max(base - e, 0.0) / (1.0 - e);
+}
+// a real cumulus ends in a sharp boundary: thin density thickens fast and the inside saturates
+float cloudCrisp(float x) { return 1.0 - exp(-x * 5.0); }
+float cloudDensity(vec3 p, float lod) {
+  float hf; float b = cloudShape(p, lod, hf);
+  return b > 0.0 ? cloudErode(p, b, hf, lod) : 0.0;
+}
+// bulk density only: shadows, light marching, particle occlusion
+float cloudDensityLo(vec3 p) { float hf; return cloudShape(p, 1.0, hf); }
+// sun shadow cast by the cloud layer onto a surface point (light still leaks through thin cloud)
 float cloudShadowAt(vec3 p) {
-  if (uSunDir.y < 0.03) return 1.0;
-  float od = 0.0;
-  for (int i = 0; i < 3; i++) {
-    float hy = mix(uCloudBase, uCloudTop, 0.15 + 0.3 * float(i));
+  if (uSunDir.y < 0.03 || uCloudCover < 0.01) return 1.0;
+  float th = uCloudTop - uCloudBase, od = 0.0;
+  float seg = th * 0.25 / uSunDir.y;
+  for (int i = 0; i < 4; i++) {
+    float hy = uCloudBase + th * (0.08 + 0.22 * float(i));
     vec3 q = p + uSunDir * ((hy - p.y) / uSunDir.y);
-    od += cloudDensityLo(q);
+    od += cloudDensityLo(q) * min(seg, 1600.0);
   }
-  return mix(1.0, exp(-od * 2.6), smoothstep(0.03, 0.12, uSunDir.y));
+  float T = exp(-od * CLOUD_SIGMA * uCloudDensity * 0.08);
+  return mix(1.0, 0.16 + 0.84 * T, smoothstep(0.03, 0.12, uSunDir.y));
 }
 `;
 

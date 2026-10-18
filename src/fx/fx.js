@@ -122,7 +122,7 @@ class ParticleSystem {
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e8);
     const u = {};
     for (const k of ['uTime', 'uSunDir', 'uSunColor', 'uSkyAmb', 'uGroundAmb', 'uSkyTex', 'uFogDensity', 'uFogHeight', 'uThermal', 'uNight',
-      'uWeatherTex', 'uNoise3D', 'uCloudBase', 'uCloudTop', 'uCloudCover', 'uWeatherScale', 'uWind', 'uLogFar', 'uNoiseTex']) u[k] = GU[k];
+      'uWeatherTex', 'uNoise3D', 'uNoiseDetail', 'uCloudBase', 'uCloudTop', 'uCloudCover', 'uCloudDensity', 'uWeatherScale', 'uWind', 'uLogFar', 'uNoiseTex']) u[k] = GU[k];
     Object.assign(u, depthU);
     this.material = new THREE.ShaderMaterial({
       uniforms: u, vertexShader: PARTICLE_VS, fragmentShader: additive ? PARTICLE_FS_ADD : PARTICLE_FS_ALPHA,

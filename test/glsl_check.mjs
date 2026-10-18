@@ -31,7 +31,7 @@ const tag = (name, from) => { for (let i = from; i < registry.length; i++) if (!
 
 let n0 = registry.length;
 const { initCloudTextures } = await import('../src/render/clouds.js');
-initCloudTextures();
+initCloudTextures(stubRenderer); tag('cloudbake', n0);
 const { Sky } = await import('../src/render/sky.js');
 n0 = registry.length; const sky = new Sky(stubRenderer); tag('sky', n0);
 const { Pipeline } = await import('../src/render/pipeline.js');
@@ -41,7 +41,7 @@ const terrain = new Terrain();
 const t0 = Date.now(); terrain.generate(); const genMs = Date.now() - t0;
 n0 = registry.length; terrain.build(stubRenderer); tag('terrain', n0);
 const { Ocean } = await import('../src/world/ocean.js');
-n0 = registry.length; const ocean = new Ocean(terrain); tag('ocean', n0);
+n0 = registry.length; const ocean = new Ocean(terrain, stubRenderer); tag('ocean', n0);
 const { FX, AfterburnerFlame } = await import('../src/fx/fx.js');
 const fakeGame = { scene: new THREE.Scene(), wind: new THREE.Vector3(), terrain, ocean, audio: {}, camera: new THREE.PerspectiveCamera() };
 n0 = registry.length; const fx = new FX(fakeGame, pipe); tag('fx', n0);
@@ -87,7 +87,9 @@ function vertexGLSL(m) {
   return '#version 300 es\n' + pre + '\n' + resolveIncludes(m.vertexShader);
 }
 function fragmentGLSL(m) {
-  const pre = ['#define varying in', 'layout(location = 0) out highp vec4 pc_fragColor;', '#define gl_FragColor pc_fragColor', '#define gl_FragDepthEXT gl_FragDepth', '#define texture2D texture', '#define textureCube texture',
+  // GLSL3 materials declare their own outputs (three leaves pc_fragColor out for them)
+  const g3 = m.glslVersion === THREE.GLSL3;
+  const pre = ['#define varying in', g3 ? '' : 'layout(location = 0) out highp vec4 pc_fragColor;', g3 ? '' : '#define gl_FragColor pc_fragColor', '#define gl_FragDepthEXT gl_FragDepth', '#define texture2D texture', '#define textureCube texture',
     '#define texture2DProj textureProj', '#define texture2DLodEXT textureLod', '#define texture2DProjLodEXT textureProjLod', '#define textureCubeLodEXT textureLod', '#define texture2DGradEXT textureGrad', '#define texture2DProjGradEXT textureProjGrad', '#define textureCubeGradEXT textureGrad',
     precision, '#define SHADER_TYPE ShaderMaterial', '#define SHADER_NAME ' + (names.get(m) || 'mat'),
     m.side === THREE.DoubleSide ? '#define DOUBLE_SIDED' : '', '#define USE_LOGARITHMIC_DEPTH_BUFFER',

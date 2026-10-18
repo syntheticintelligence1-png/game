@@ -240,6 +240,16 @@ and UAVs, a multi-stage theater.
   with distance in the vertex shader (`ringMaterial`), otherwise a ring is a sub-pixel sliver beyond a kilometre. The
   test pilot (lift-vector pursuit at ~485 kt, easing off as G stress builds) finishes in about 4:08; at ~560 kt it
   misses the canyon turns and crashes. Sustained 7.5 g blacks the pilot out after about 4 s (player.js physiology).
+- Sky, clouds and sea (session 5, "the water and clouds look fake"): clouds are raymarched volumes (clouds.js,
+  density model in glsl.js GLSL_CLOUDS, Nubis-style: weather map + 128^3 Perlin-Worley shape + 32^3 Worley erosion,
+  `cloudCrisp` for sharp edges, multiple-scattering octaves with a diffusion-style last octave so bases are grey, not
+  black). Half-res march with a golden-ratio jitter and temporal reprojection; empty air is skipped two steps at a
+  time with a backtrack (a biased skip drew stripes). cloudBulkCPU in clouds.js is the CPU copy of cloudShape: keep
+  them in step. The sea (ocean.js) has a real planar reflection (pipeline.js, oblique clip plane; a second
+  CloudRenderer with `mirror: true` for the clouds it reflects), GPU ripple tiles, wave groups and a wandering phase
+  on the Gerstner normals (no corduroy), and WEATHER.rough per weather sets how glassy it is. sky.js integrates the
+  atmosphere with cubic step spacing (even steps drew a brown band at the horizon). Look with
+  `QUALITY=high CLEAN=2 DRAWS=12 node .scratch/looks.mjs sea` (ONLY=boat,fleet... picks views); about 3 minutes.
 
 ## Player preferences (important)
 - Beginner who wants to have fun and roleplay as a military pilot. Wants plain English on screen and to always know what to press.
@@ -247,6 +257,8 @@ and UAVs, a multi-stage theater.
   asked. Ship builds fast, then let them test.
 - Session 4: "the game still feels boring", wanted much more content (drones, a campaign, the phases, graphics).
 - Don't use subagents.
+- Session 5: graphics first ("the water and clouds look fake"). The player is the tester: don't run the long test
+  suites (smoke etc.) unless asked; build, push, release, and let them judge. Don't over-engineer.
 
 ## Known issues / next ideas
 - `wingman.mjs sead` can still fail: the air combat is random, and now and then the wingman is shot down before he

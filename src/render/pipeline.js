@@ -1,7 +1,9 @@
 // Multi-pass HDR pipeline:
+//  0. reflection: the world above the sea seen by a camera mirrored in the surface (scene + clouds + haze, low
+//     res, mipmapped) -> reflRT; the ocean shader samples it
 //  1. scene  -> sceneRT (RGBA16F + float log-depth texture)
-//  2. clouds -> cloudRT (half res, depth aware raymarch)
-//  3. composite: aerial perspective + clouds -> hdrRT
+//  2. clouds -> CloudRenderer (reduced res raymarch + temporal reprojection)
+//  3. composite: aerial perspective + depth-aware upsampled clouds -> hdrRT
 //  4. particles / trails / flames -> hdrRT (soft depth test against scene depth)
 //  5. distortion (shockwaves) -> distRT
 //  6. bloom (Karis-filtered down chain + tent up chain)
@@ -9,66 +11,101 @@
 //  7. final: exposure, ACES, colour grade, lens flare, G-LOC grey/black/red-out, vignette, sensor modes, grain
 import * as THREE from 'three';
 import { GU, GLSL_COMMON, GLSL_ACES, FULLSCREEN_VS, fullscreenTriangle } from './glsl.js';
-import { makeCloudMaterial } from './clouds.js';
+import { CloudRenderer } from './clouds.js';
 
 const HALF = THREE.HalfFloatType;
 
 export const SENSOR = { NORMAL: 0, TV: 1, WHOT: 2, BHOT: 3, NVG: 4 };
 
+// per quality: cloud raymarch resolution divisor, steps, sun-light steps; reflection resolution divisor (0 = none)
+const QUALITY = {
+  low: { cloudDiv: 2.5, steps: 32, light: 4, refl: 0 },
+  medium: { cloudDiv: 2, steps: 44, light: 5, refl: 3 },
+  high: { cloudDiv: 2, steps: 64, light: 6, refl: 2 },
+};
+
+function makeCompositeMaterial(mirror) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      ...pick(['uTime', 'uSunDir', 'uSunColor', 'uSkyAmb', 'uGroundAmb', 'uSkyTex', 'uFogDensity', 'uFogHeight', 'uThermal', 'uNight', 'uLogFar']),
+      uScene: { value: null }, uDepth: { value: null }, uClouds: { value: null }, uCloudRes: { value: new THREE.Vector2(1, 1) },
+      uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uCamPosC: { value: new THREE.Vector3() },
+      uUnderwater: { value: 0 }, uCloudOn: { value: 1 }, uMirror: { value: mirror ? 1 : 0 },
+    },
+    vertexShader: FULLSCREEN_VS,
+    fragmentShader: /* glsl */`
+      ${GLSL_COMMON}
+      uniform sampler2D uScene; uniform sampler2D uDepth; uniform sampler2D uClouds; uniform vec2 uCloudRes;
+      uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform vec3 uCamPosC; uniform float uLogFar;
+      uniform float uUnderwater; uniform float uCloudOn; uniform float uMirror;
+      varying vec2 vUv;
+      // the clouds were marched at low resolution: weigh the four nearest texels by how well the depth their rays
+      // stopped at matches this pixel's, so a jet in front of a cloud keeps a clean outline
+      vec4 cloudsAt(vec2 uv, float d) {
+        vec2 p = uv * uCloudRes - 0.5; vec2 i = floor(p); vec2 f = p - i;
+        vec4 acc = vec4(0.0); float ws = 0.0;
+        for (int k = 0; k < 4; k++) {
+          vec2 o = vec2(float(k & 1), float(k >> 1));
+          vec2 cuv = (i + o + 0.5) / uCloudRes;
+          float bw = (o.x > 0.5 ? f.x : 1.0 - f.x) * (o.y > 0.5 ? f.y : 1.0 - f.y);
+          float w = bw * (exp(-abs(texture(uDepth, cuv).r - d) * 400.0) + 1e-4);
+          acc += texture(uClouds, cuv) * w; ws += w;
+        }
+        return acc / max(ws, 1e-6);
+      }
+      void main() {
+        vec3 col = texture(uScene, vUv).rgb;
+        float d = texture(uDepth, vUv).r;
+        vec4 vr = uInvProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+        vec3 vdir = normalize(vr.xyz / vr.w);
+        vec3 rd = normalize(mat3(uCamWorld) * vdir);
+        if (d < 0.999999) {
+          float w = exp2(d * uLogFar) - 1.0;
+          float dist = w / max(-vdir.z, 1e-4);
+          vec3 ro = uCamPosC;
+          // mirror view: the haze only counts from the sea surface up
+          if (uMirror > 0.5) { float tw = rd.y > 1e-4 ? max(-ro.y / rd.y, 0.0) : 0.0; ro += rd * tw; dist = max(dist - tw, 0.0); }
+          if (uThermal > 0.5) {
+            float T = fogTransmittance(ro, rd, dist * 0.6);
+            col = col * T + vec3(0.1) * (1.0 - T);
+          } else {
+            col = aerialPerspective(col, ro, rd, dist);
+          }
+        }
+        if (uCloudOn > 0.5) {
+          vec4 cl = cloudsAt(vUv, d);
+          col = col * cl.a + cl.rgb;
+        }
+        if (uUnderwater > 0.5) col = col * vec3(0.05, 0.25, 0.3) + vec3(0.0, 0.03, 0.05);
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+    depthTest: false, depthWrite: false,
+  });
+}
+
 export class Pipeline {
   constructor(renderer, w, h, opts = {}) {
     this.r = renderer;
     this.quality = opts.quality || 'medium';
-    this.cloudSteps = { low: 28, medium: 44, high: 64 }[this.quality] || 44;
     this.scale = opts.scale || 1;
     this.flare = opts.flare !== false;
+    this.allowRefl = opts.reflect !== false;
     this.frame = 0;
     this.quadScene = new THREE.Scene();
     this.quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.quad = new THREE.Mesh(fullscreenTriangle(), null);
     this.quad.frustumCulled = false;
     this.quadScene.add(this.quad);
+    this._pass = (m, t) => this.pass(m, t);
 
-    this.cloudMat = makeCloudMaterial();
-    this.compositeMat = new THREE.ShaderMaterial({
-      uniforms: {
-        ...pick(['uTime', 'uSunDir', 'uSunColor', 'uSkyAmb', 'uGroundAmb', 'uSkyTex', 'uFogDensity', 'uFogHeight', 'uThermal', 'uNight', 'uLogFar']),
-        uScene: { value: null }, uDepth: { value: null }, uClouds: { value: null },
-        uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uCamPosC: { value: new THREE.Vector3() },
-        uUnderwater: { value: 0 }, uCloudOn: { value: 1 },
-      },
-      vertexShader: FULLSCREEN_VS,
-      fragmentShader: /* glsl */`
-        ${GLSL_COMMON}
-        uniform sampler2D uScene; uniform sampler2D uDepth; uniform sampler2D uClouds;
-        uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform vec3 uCamPosC; uniform float uLogFar;
-        uniform float uUnderwater; uniform float uCloudOn;
-        varying vec2 vUv;
-        void main() {
-          vec3 col = texture(uScene, vUv).rgb;
-          float d = texture(uDepth, vUv).r;
-          vec4 vr = uInvProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
-          vec3 vdir = normalize(vr.xyz / vr.w);
-          vec3 rd = normalize(mat3(uCamWorld) * vdir);
-          if (d < 0.999999) {
-            float w = exp2(d * uLogFar) - 1.0;
-            float dist = w / max(-vdir.z, 1e-4);
-            if (uThermal > 0.5) {
-              float T = fogTransmittance(uCamPosC, rd, dist * 0.6);
-              col = col * T + vec3(0.1) * (1.0 - T);
-            } else {
-              col = aerialPerspective(col, uCamPosC, rd, dist);
-            }
-          }
-          if (uCloudOn > 0.5) {
-            vec4 cl = texture(uClouds, vUv);
-            col = col * cl.a + cl.rgb;
-          }
-          if (uUnderwater > 0.5) col = col * vec3(0.05, 0.25, 0.3) + vec3(0.0, 0.03, 0.05);
-          gl_FragColor = vec4(col, 1.0);
-        }`,
-      depthTest: false, depthWrite: false,
-    });
+    this.clouds = new CloudRenderer(renderer, { temporal: opts.temporal !== false });
+    this.cloudMat = this.clouds.march; // game.js lights the clouds with a tracked missile's plume through this
+    this.compositeMat = makeCompositeMaterial(false);
+    // what the reflection pass leaves out (the sea itself, the cockpit...), set by the game
+    this.refl = { hide: [], dome: null, terrain: null };
+    this.reflCam = new THREE.PerspectiveCamera();
+    this._hid = [];
+    this.applyQuality();
 
     this.bloomDownMat = new THREE.ShaderMaterial({
       uniforms: { uSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uFirst: { value: 0 }, uThreshold: { value: 1.0 } },
@@ -164,7 +201,7 @@ export class Pipeline {
         uFlash: { value: 0 }, uDamage: { value: 0 }, uNoise: { value: 0 }, uDegrade: { value: 0 }, uVignette: { value: 0.28 },
         uHurt: { value: 0 }, uFade: { value: 0 }, uInCloud: { value: 0 },
         uShafts: { value: null }, uShaftMask: { value: null }, uShaftStr: { value: 0 }, uSunUV: { value: new THREE.Vector2(0.5, 0.5) },
-        uSunK: { value: 0 }, uSunTint: { value: new THREE.Vector3(1, 1, 1) }, uFlareStr: { value: 1 }, uCA: { value: 0.0032 },
+        uSunK: { value: 0 }, uSunTint: { value: new THREE.Vector3(1, 1, 1) }, uFlareStr: { value: 1 }, uCA: { value: 0.0018 },
       },
       vertexShader: FULLSCREEN_VS,
       fragmentShader: /* glsl */`
@@ -293,15 +330,37 @@ export class Pipeline {
     });
   }
 
+  // quality: cloud steps and resolution, and whether the sea gets a real reflection
+  applyQuality() {
+    const Q = QUALITY[this.quality] || QUALITY.medium;
+    this.cloudDiv = Q.cloudDiv; this.clouds.steps = Q.steps; this.clouds.lightSteps = Q.light;
+    this.reflDiv = this.allowRefl ? Q.refl : 0;
+    if (this.reflDiv && !this.reflClouds) {
+      this.reflClouds = new CloudRenderer(this.r, { steps: 26, lightSteps: 4, mirror: true });
+      this.reflCompMat = makeCompositeMaterial(true);
+    }
+    if (!this.reflDiv) GU.uReflOn.value = 0;
+  }
+  // the render targets depend on the quality: call setSize afterwards
+  setQuality(q) { this.quality = q; this.applyQuality(); }
+
   setSize(w, h) {
     this.w = Math.max(2, Math.floor(w * this.scale)); this.h = Math.max(2, Math.floor(h * this.scale));
     const W = this.w, H = this.h;
-    for (const rt of [this.sceneRT, this.cloudRT, this.hdrRT, this.distRT, ...(this.bloomRTs || []), ...(this.shaftRTs || [])]) if (rt) rt.dispose();
+    for (const rt of [this.sceneRT, this.hdrRT, this.distRT, this.reflSceneRT, this.reflRT, ...(this.bloomRTs || []), ...(this.shaftRTs || [])]) if (rt) rt.dispose();
     const depthTex = new THREE.DepthTexture(W, H, THREE.FloatType);
     depthTex.minFilter = THREE.NearestFilter; depthTex.magFilter = THREE.NearestFilter;
     this.sceneRT = this.makeRT(W, H, { depthBuffer: true, depthTexture: depthTex });
-    this.cloudDiv = this.quality === 'high' ? 1.5 : 2;
-    this.cloudRT = this.makeRT(W / this.cloudDiv, H / this.cloudDiv);
+    this.clouds.setSize(W / this.cloudDiv, H / this.cloudDiv);
+    this.reflSceneRT = this.reflRT = null;
+    if (this.reflDiv) {
+      const rw = Math.max(2, Math.round(W / this.reflDiv)), rh = Math.max(2, Math.round(H / this.reflDiv));
+      const rd = new THREE.DepthTexture(rw, rh, THREE.FloatType); rd.minFilter = rd.magFilter = THREE.NearestFilter;
+      this.reflDepth = rd;
+      this.reflSceneRT = this.makeRT(rw, rh, { depthBuffer: true, depthTexture: rd });
+      this.reflRT = this.makeRT(rw, rh, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, anisotropy: 8 });
+      this.reflClouds.setSize(rw / 2, rh / 2);
+    }
     this.hdrRT = this.makeRT(W, H);
     this.distRT = this.makeRT(W / 2, H / 2);
     this.bloomRTs = [];
@@ -318,6 +377,44 @@ export class Pipeline {
     this.r.render(this.quadScene, this.quadCam);
   }
 
+  // the world above the sea, seen by the main camera mirrored in the surface (y = 0). The ocean shader projects its
+  // reflected rays into this picture through uReflMat.
+  renderReflection(scene, camera, cloudsOn) {
+    const r = this.r, vc = this.reflCam, R = this.refl;
+    _p.setFromMatrixPosition(camera.matrixWorld);
+    if (_p.y < 0.3 || !seesWater(camera)) { GU.uReflOn.value = 0; return; }
+    _f.set(0, 0, -1).transformDirection(camera.matrixWorld); _u.set(0, 1, 0).transformDirection(camera.matrixWorld);
+    vc.position.set(_p.x, -_p.y, _p.z); vc.up.set(_u.x, -_u.y, _u.z);
+    vc.lookAt(_p.x + _f.x, -_p.y - _f.y, _p.z + _f.z);
+    // a little wider than the eye's view: ripples tilt the rays near the screen edges outward
+    vc.fov = Math.min(camera.fov * 1.08 + 1, 150); vc.zoom = camera.zoom; vc.aspect = camera.aspect; vc.near = camera.near; vc.far = camera.far;
+    vc.updateProjectionMatrix(); vc.updateMatrixWorld();
+    GU.uReflMat.value.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1).multiply(vc.projectionMatrix).multiply(vc.matrixWorldInverse);
+    const hid = this._hid; hid.length = 0;
+    for (const o of R.hide) if (o && o.visible) { o.visible = false; hid.push(o); }
+    const sm = r.shadowMap.autoUpdate; r.shadowMap.autoUpdate = false;
+    const sun = R.dome && R.dome.material.uniforms.uSunDisk; if (sun) sun.value = 0; // the sea draws its own sun glitter
+    // Everything below the sea (hulls under the waterline, the sea floor) would sit between the mirrored camera and
+    // the surface: an oblique near plane on the water clips it for every material. The clouds and the composite
+    // below need the plain projection back (the oblique one bends the far plane behind the camera for flat rays).
+    _proj.copy(vc.projectionMatrix); obliqueNearPlane(vc);
+    if (R.terrain) R.terrain.updateLOD(vc);
+    r.setRenderTarget(this.reflSceneRT); r.setClearColor(0x000000, 1); r.clear(true, true, false);
+    r.render(scene, vc);
+    vc.projectionMatrix.copy(_proj);
+    if (R.terrain) R.terrain.updateLOD(camera);
+    if (sun) sun.value = 1; r.shadowMap.autoUpdate = sm;
+    for (const o of hid) o.visible = true;
+    if (cloudsOn) this.reflClouds.render(vc, this.reflDepth, this._pass);
+    const cu = this.reflCompMat.uniforms;
+    cu.uScene.value = this.reflSceneRT.texture; cu.uDepth.value = this.reflDepth;
+    cu.uClouds.value = this.reflClouds.texture; cu.uCloudRes.value.set(this.reflClouds.w, this.reflClouds.h);
+    cu.uInvProj.value.copy(vc.projectionMatrixInverse); cu.uCamWorld.value.copy(vc.matrixWorld); cu.uCamPosC.value.copy(vc.position);
+    cu.uCloudOn.value = cloudsOn ? 1 : 0;
+    this.pass(this.reflCompMat, this.reflRT);
+    GU.uReflTex.value = this.reflRT.texture; GU.uReflOn.value = 1;
+  }
+
   // fx: { mode, grey, red, exposure, flash, noise, degrade, hurt, fade, inCloud, cloudsOn }
   render(scene, fxScene, camera, fx) {
     const r = this.r;
@@ -325,6 +422,11 @@ export class Pipeline {
     GU.uThermal.value = (fx.mode === SENSOR.WHOT || fx.mode === SENSOR.BHOT) ? 1 : 0;
     GU.uCamPos.value.copy(camera.position);
     r.autoClear = false;
+    camera.updateMatrixWorld();
+    const cloudsOn = fx.cloudsOn !== false;
+    // 0. what the sea reflects
+    if (this.reflDiv && !GU.uThermal.value && !fx.underwater) this.renderReflection(scene, camera, cloudsOn);
+    else GU.uReflOn.value = 0;
     // 1. scene
     r.setRenderTarget(this.sceneRT);
     r.setClearColor(0x000000, 1);
@@ -332,17 +434,13 @@ export class Pipeline {
     r.render(scene, camera);
 
     // 2. clouds
-    camera.updateMatrixWorld();
     const invProj = camera.projectionMatrixInverse, camWorld = camera.matrixWorld;
-    const cu = this.cloudMat.uniforms;
-    cu.uDepth.value = this.depthTexture; cu.uInvProj.value.copy(invProj); cu.uCamWorld.value.copy(camWorld);
-    cu.uCamPosC.value.copy(camera.position); cu.uSteps.value = this.cloudSteps; cu.uFrame.value = this.frame;
-    const cloudsOn = fx.cloudsOn !== false;
-    if (cloudsOn) this.pass(this.cloudMat, this.cloudRT);
+    if (cloudsOn) this.clouds.render(camera, this.depthTexture, this._pass);
 
     // 3. composite
     const pu = this.compositeMat.uniforms;
-    pu.uScene.value = this.sceneRT.texture; pu.uDepth.value = this.depthTexture; pu.uClouds.value = this.cloudRT.texture;
+    pu.uScene.value = this.sceneRT.texture; pu.uDepth.value = this.depthTexture;
+    pu.uClouds.value = this.clouds.texture; pu.uCloudRes.value.set(this.clouds.w, this.clouds.h);
     pu.uInvProj.value.copy(invProj); pu.uCamWorld.value.copy(camWorld); pu.uCamPosC.value.copy(camera.position);
     pu.uCloudOn.value = cloudsOn ? 1 : 0; pu.uUnderwater.value = fx.underwater ? 1 : 0;
     this.pass(this.compositeMat, this.hdrRT);
@@ -376,7 +474,7 @@ export class Pipeline {
     const sun = this.flare && !fx.mode && !fx.underwater ? this.sunScreen(camera) : null;
     if (sun && sun.k > 0.001) {
       const mu = this.shaftMaskMat.uniforms, S = this.shaftRTs;
-      mu.uDepth.value = this.depthTexture; mu.uClouds.value = this.cloudRT.texture; mu.uCloudOn.value = cloudsOn ? 1 : 0;
+      mu.uDepth.value = this.depthTexture; mu.uClouds.value = this.clouds.texture; mu.uCloudOn.value = cloudsOn ? 1 : 0;
       mu.uInvProj.value.copy(invProj); mu.uCamWorld.value.copy(camWorld);
       this.pass(this.shaftMaskMat, S[0]);
       // long jittered steps all the way to the sun, then a short pass that fills the gaps between them
@@ -409,6 +507,27 @@ export class Pipeline {
     return { x: _sp.x * 0.5 + 0.5, y: _sp.y * 0.5 + 0.5, k: S(facing, 0.05, 0.3) * (1 - S(off, 1.0, 1.8)) * S(sd.y, -0.03, 0.05) };
   }
 }
-const _fwd = new THREE.Vector3(), _sp = new THREE.Vector3();
+const _fwd = new THREE.Vector3(), _sp = new THREE.Vector3(), _p = new THREE.Vector3(), _f = new THREE.Vector3(), _u = new THREE.Vector3();
+const _proj = new THREE.Matrix4(), _plane = new THREE.Plane(), _q4 = new THREE.Vector4(), _c4 = new THREE.Vector4(), _corner = new THREE.Vector3(), _up = new THREE.Vector3();
+
+// does any of the view reach below the horizon? (the reflection is skipped when the camera only sees sky)
+function seesWater(camera) {
+  for (let i = 0; i < 4; i++) {
+    _corner.set(i & 1 ? 1 : -1, i & 2 ? 1 : -1, 1).unproject(camera).sub(camera.position);
+    if (_corner.y < 0) return true;
+  }
+  return false;
+}
+
+// Lengyel's oblique near plane: the camera's near clipping plane becomes the sea surface (three's Reflector does
+// the same). Only the depth row changes, so the log depth and the reflection lookup are unaffected.
+function obliqueNearPlane(cam) {
+  _plane.set(_up.set(0, 1, 0), 0).applyMatrix4(cam.matrixWorldInverse);
+  _c4.set(_plane.normal.x, _plane.normal.y, _plane.normal.z, _plane.constant);
+  const e = cam.projectionMatrix.elements;
+  _q4.set((Math.sign(_c4.x) + e[8]) / e[0], (Math.sign(_c4.y) + e[9]) / e[5], -1, (1 + e[10]) / e[14]);
+  _c4.multiplyScalar(2 / _c4.dot(_q4));
+  e[2] = _c4.x; e[6] = _c4.y; e[10] = _c4.z + 1; e[14] = _c4.w;
+}
 
 function pick(names) { const o = {}; for (const n of names) o[n] = GU[n]; return o; }

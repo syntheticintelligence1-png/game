@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { GU } from '../render/glsl.js';
 import { Pipeline, SENSOR } from '../render/pipeline.js';
 import { Sky } from '../render/sky.js';
-import { initCloudTextures } from '../render/clouds.js';
+import { initCloudTextures, cloudBulkCPU } from '../render/clouds.js';
 import { Terrain, SITES, ROADS, TER } from '../world/terrain.js';
 import { Ocean } from '../world/ocean.js';
 import { buildCarrier, buildDestroyer, DECK_Y, CATS, LANDING, landingPoint } from '../models/carrier.js';
@@ -32,6 +32,12 @@ import { mulberry32 } from '../core/noise.js';
 
 const D2R = Math.PI / 180;
 const DT = 1 / 120;
+// per menu weather: cloud cover (about the fraction of sky clouded), how grey that leaves the sky light, and how
+// ruffled the sea's surface is (ripples and short chop; the swell the ships ride stays the same)
+const WEATHER = {
+  clear: { cover: 0, grey: 0, rough: 0.4 }, scattered: { cover: 0.42, grey: 0.06, rough: 0.5 },
+  broken: { cover: 0.62, grey: 0.25, rough: 0.55 }, overcast: { cover: 0.93, grey: 0.75, rough: 1 },
+};
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _q = new THREE.Quaternion();
 
 export class Game {
@@ -61,16 +67,17 @@ export class Game {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(60, W / H, 0.05, 200000);
     await step('Synthesizing cloud noise volumes', 0.06);
-    initCloudTextures();
-    GU.uCloudCover.value = { clear: 0.0, scattered: 0.55, broken: 0.82, overcast: 1.15 }[this.opts.weather || 'scattered'];
-    this.sky = new Sky(r); this.sky.setTime(this.opts.hour != null ? this.opts.hour : 9.5);
+    initCloudTextures(r);
+    const wx = WEATHER[this.opts.weather] || WEATHER.scattered; GU.uCloudCover.value = wx.cover;
+    this.sky = new Sky(r); this.sky.setTime(this.opts.hour != null ? this.opts.hour : 9.5); this.sky.setOvercast(wx.grey);
     this.scene.add(this.sky.dome, this.sky.sunLight, this.sky.sunLight.target);
     await step('Generating island terrain (ridges, canyons, coast)', 0.12);
     this.terrain = new Terrain();
     this.terrain.generate();
     await step('Building terrain LOD and shadows', 0.45);
     this.terrain.build(r); this.scene.add(this.terrain.group);
-    this.ocean = new Ocean(this.terrain); this.ocean.setShoreTexture(this.terrain.nTex); this.scene.add(this.ocean.mesh);
+    this.ocean = new Ocean(this.terrain, r); this.ocean.setShoreTexture(this.terrain.nTex); this.scene.add(this.ocean.mesh);
+    this.ocean.uniforms.uRough.value = wx.rough;
     this.weatherData = GU.uWeatherTex.value.image.data;
     this.clock = { t: 0 };
     await step('Launching carrier strike group', 0.55);
@@ -110,7 +117,9 @@ export class Game {
     this.setupScenario(this.opts.scenario || 'carrier');
     // TGP sensor pipeline
     this.tgpCam = new THREE.PerspectiveCamera(5, 1, 0.5, 200000);
-    this.tgpPipe = new Pipeline(r, 320, 320, { quality: 'low', scale: 1, flare: false });
+    this.tgpPipe = new Pipeline(r, 320, 320, { quality: 'low', scale: 1, flare: false, reflect: false });
+    // the sea's reflection leaves out the sea itself and the cockpit around the camera
+    this.pipe.refl = { hide: [this.ocean.mesh, this.player.model.cockpit.group], dome: this.sky.dome, terrain: this.terrain };
     this.tgpRT = new THREE.WebGLRenderTarget(320, 320, { type: THREE.UnsignedByteType, depthBuffer: false });
     this.pipQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: this.tgpRT.texture, depthTest: false, depthWrite: false, toneMapped: false }));
     this.pipScene = new THREE.Scene(); this.pipScene.add(this.pipQuad); this.pipCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -407,20 +416,18 @@ export class Game {
   msg(text, dur = 2, color) { this.msgs = this.msgs.filter(m => m.text !== text); this.msgs.push({ text, t: dur, color }); if (this.msgs.length > 5) this.msgs.shift(); }
   radio(text, team, plain) { this.comms.call(team === 'red' ? 'enemy' : 'awacs', text, plain || '', { pri: 1, ttl: 6 }); }
   get sunDir() { return GU.uSunDir.value; }
+  // how much light (or a seeker's view) gets through the clouds between a and b, 0..1
   cloudTransmittance(a, b) {
-    const base = GU.uCloudBase.value, top = GU.uCloudTop.value, cov = GU.uCloudCover.value; if (cov <= 0.01) return 1;
+    const base = GU.uCloudBase.value, top = GU.uCloudTop.value; if (GU.uCloudCover.value <= 0.005) return 1;
     const d = _v3.copy(b).sub(a); const L = d.length(); if (L < 1) return 1; d.multiplyScalar(1 / L);
     let t0, t1; if (Math.abs(d.y) < 1e-4) { if (a.y < base || a.y > top) return 1; t0 = 0; t1 = L; } else { const ta = (base - a.y) / d.y, tb = (top - a.y) / d.y; t0 = Math.max(Math.min(ta, tb), 0); t1 = Math.min(Math.max(ta, tb), L); }
     if (t1 <= t0) return 1;
-    const W = this.weatherData, S = GU.uWeatherScale.value, wnd = GU.uWind.value; let od = 0; const n = 6;
+    const W = this.weatherData; let od = 0; const n = 6;
     for (let i = 0; i < n; i++) {
-      const t = t0 + (i + 0.5) / n * (t1 - t0); const x = a.x + d.x * t + wnd.x, z = a.z + d.z * t + wnd.y;
-      let u = (x / S) % 1; if (u < 0) u += 1; let v = (z / S) % 1; if (v < 0) v += 1;
-      const c = W[((Math.floor(v * 512) * 512) + Math.floor(u * 512)) * 4] / 255;
-      const k = Math.max(0, c * cov * 1.25 - 0.45);
-      od += k * (t1 - t0) / n;
+      const t = t0 + (i + 0.5) / n * (t1 - t0);
+      od += cloudBulkCPU(W, 512, a.x + d.x * t, a.y + d.y * t, a.z + d.z * t) * (t1 - t0) / n;
     }
-    return Math.exp(-od * 0.01);
+    return Math.exp(-od * 0.02);
   }
   raycastGround(o, dir, maxD) {
     let t = 0, step = 20;
@@ -629,10 +636,17 @@ export class Game {
     this.scene.environment = this.sky.updateEnv();
     this.terrain.updateShadows(GU.uSunDir.value); this.applyNight();
   }
-  setWeather(w) { GU.uCloudCover.value = { clear: 0.0, scattered: 0.55, broken: 0.82, overcast: 1.15 }[w] ?? 0.55; this.opts.weather = w; }
+  setWeather(w) {
+    const wx = WEATHER[w] || WEATHER.scattered; this.opts.weather = w;
+    this.ocean.uniforms.uRough.value = wx.rough;
+    if (GU.uCloudCover.value === wx.cover && this.sky.overcast === wx.grey) return;
+    GU.uCloudCover.value = wx.cover; this.sky.setOvercast(wx.grey);
+    // the grey of the sky light reaches the sky picture, the ambient light and the reflections on lit materials
+    this.sky.update(this.camera.position, 0); this.scene.environment = this.sky.updateEnv();
+  }
   setQuality(q) {
     this.opts.quality = q; const p = this.pipe;
-    p.quality = q; p.cloudSteps = { low: 28, medium: 44, high: 64 }[q] || 44; p.scale = { low: 0.7, medium: 0.9, high: 1 }[q] || 0.9;
+    p.scale = { low: 0.7, medium: 0.9, high: 1 }[q] || 0.9; p.setQuality(q);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, q === 'high' ? 1.5 : 1));
     this.resize();
   }
@@ -904,6 +918,10 @@ export class Game {
     const focus = this.rig.mode === 'chase' || this.rig.mode === 'cockpit' ? P.pos : this.camera.position;
     this.sky.followCamera(this.camera, focus);
     if (this.sky.update(this.camera.position, this.frameN)) { /* sky texture refreshed */ }
+    // ships and aircraft (three's lights) darken in a cloud's shadow like the sea and the land around them
+    const shade = this.sunShade(focus);
+    this.sunShadeK = this.sunShadeK == null ? shade : this.sunShadeK + (shade - this.sunShadeK) * Math.min(1, dt * 3);
+    this.sky.sunLight.intensity = (this.sky.sunI ?? this.sky.sunLight.intensity) * this.sunShadeK;
     this.terrain.updateLOD(this.camera);
     this.ocean.update(this.camera.position, this.ships);
     // ship animations
@@ -1006,7 +1024,19 @@ export class Game {
     P.model.cockpit.group.visible = ckVis;
   }
 
-  inCloud(p) { return this.cloudTransmittance(p, _v.copy(p).add(new THREE.Vector3(0, 0.5, 0))) < 0.999 && p.y > GU.uCloudBase.value && p.y < GU.uCloudTop.value && this.cloudTransmittance(p.clone().add(new THREE.Vector3(-30, 0, 0)), p.clone().add(new THREE.Vector3(30, 0, 0))) < 0.6; }
+  inCloud(p) { return cloudBulkCPU(this.weatherData, 512, p.x, p.y, p.z) > 0.1; }
+  // sunlight left at p after the cloud layer above (the CPU twin of cloudShadowAt in glsl.js)
+  sunShade(p) {
+    const sd = GU.uSunDir.value; if (sd.y < 0.03 || GU.uCloudCover.value < 0.01) return 1;
+    const base = GU.uCloudBase.value, th = GU.uCloudTop.value - base, seg = Math.min(th * 0.25 / sd.y, 1600);
+    let od = 0;
+    for (let i = 0; i < 4; i++) {
+      const hy = base + th * (0.08 + 0.22 * i), t = (hy - p.y) / sd.y; if (t < 0) continue;
+      od += cloudBulkCPU(this.weatherData, 512, p.x + sd.x * t, hy, p.z + sd.z * t) * seg;
+    }
+    const k = THREE.MathUtils.smoothstep(sd.y, 0.03, 0.12);
+    return 1 - k + k * (0.16 + 0.84 * Math.exp(-od * 0.0056));
+  }
 
   drawHUD() {
     const P = this.player, ac = P.ac, s = ac.s, cam = this.camera; const mode = this.rig.mode;

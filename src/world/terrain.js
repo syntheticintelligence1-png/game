@@ -328,7 +328,7 @@ export class Terrain {
     const craters = []; for (let i = 0; i < 24; i++) craters.push(new THREE.Vector4(0, 0, 0, -1));
     const u = {};
     for (const n of ['uTime', 'uSunDir', 'uSunColor', 'uSkyAmb', 'uGroundAmb', 'uSkyTex', 'uFogDensity', 'uFogHeight', 'uThermal', 'uNight',
-      'uNoiseTex', 'uWeatherTex', 'uNoise3D', 'uCloudBase', 'uCloudTop', 'uCloudCover', 'uWeatherScale', 'uWind', 'uLightPos', 'uLightCol']) u[n] = GU[n];
+      'uNoiseTex', 'uWeatherTex', 'uNoise3D', 'uNoiseDetail', 'uCloudBase', 'uCloudTop', 'uCloudCover', 'uCloudDensity', 'uWeatherScale', 'uWind', 'uLightPos', 'uLightCol']) u[n] = GU[n];
     Object.assign(u, {
       uHeight: { value: hTex }, uNormalTex: { value: nTex }, uFeatTex: { value: fTex }, uShadowTex: { value: this.shadowRT.texture },
       uCell: { value: TER.CELL }, uHalf: { value: TER.HALF }, uTerrSize: { value: TER.SIZE }, uSkirt: { value: 60 }, uCraters: { value: craters },
